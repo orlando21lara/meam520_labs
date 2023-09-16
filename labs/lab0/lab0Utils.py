@@ -3,7 +3,7 @@ import numpy as np
 
 def linear_solver(A, b):
     """
-    Solve for x Ax=b. Assume A is invertible.
+    Solve for x in Ax=b. Assume A is invertible.
     Args:
         A: nxn numpy array
         b: 0xn numpy array
@@ -11,8 +11,7 @@ def linear_solver(A, b):
     Returns:
         x: 0xn numpy array
     """
-    # Insert student code here
-    return b
+    return np.linalg.solve(A, b)
 
 
 def angle_solver(v1, v2):
@@ -25,11 +24,13 @@ def angle_solver(v1, v2):
     Returns:
         theta = scalar >= 0 = angle in radians
     """
-    # Insert student code here
-    return 0
+    v1_mag = np.linalg.norm(v1)
+    v2_mag = np.linalg.norm(v2)
+    dot_prod = np.dot(v1, v2)
+    return np.arccos(dot_prod / (v1_mag * v2_mag))     # Output in radians between 0 and pi
 
 
-def linear_euler_integration(A, x0, dt, nSteps):
+def linear_euler_integration(A, x0, dt, num_steps):
     """
     Integrate the ode x'=Ax using euler integration where:
     x_{k+1} = dt (A x_k) + x_k
@@ -42,8 +43,10 @@ def linear_euler_integration(A, x0, dt, nSteps):
     Returns:
         x: state after nSteps time steps (np array)
     """
-    # Insert student code here
-    return x0
+    state_x = x0
+    for i in range(num_steps):
+        state_x = state_x + dt * (A @ state_x)
+    return state_x
 
 
 if __name__ == '__main__':
