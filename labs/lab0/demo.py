@@ -20,12 +20,27 @@ rospy.init_node('demo')
 arm = ArmController()
 arm.set_arm_speed(0.2)
 
-arm.close_gripper()
+# arm.close_gripper()
 
-q = arm.neutral_position()
-arm.safe_move_to_position(q)
+# q = arm.neutral_position()
+# arm.safe_move_to_position(q)
+
 arm.open_gripper()
 
-q = np.array([0,-1 ,0,-2,0,1,1]) # TODO: try changing this!
+""" Configurations """
+# Straight up:
+# q = np.array([0, 0, 0, -0.07, 0, 1.57, 0.785])
+
+# One thousand years of death:
+# q = np.array([0, -1.76280, 0, -3, 0, 3.7, -0.785])
+
+# Look over shoulder:
+# q = np.array([0.7, 0.7, 0.7, -0.07, 0, 1.57, 0.7])
+
+# Bowing:
+q = np.array([-1.57, 1.57, 0, -0.07, 0, 0.7, 0.785])
+
+
 arm.safe_move_to_position(q)
+
 arm.close_gripper()
