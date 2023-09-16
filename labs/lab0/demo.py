@@ -15,17 +15,33 @@ from math import pi
 
 from core.interfaces import ArmController
 
-rospy.init_node('demo')
+def print_joint_values(arm, header_msg = "Current joint values:"):
+    """Prints the current joint values of the arm"""
+    print(header_msg)
+    joint_values = arm.get_positions()
+    for idx, joint in enumerate(joint_values):
+        print("\tJoint {:.4f}: {:.4f}".format(idx, joint))
 
-arm = ArmController()
-arm.set_arm_speed(0.2)
+def main():
+    rospy.init_node('demo')
 
-arm.close_gripper()
+    arm = ArmController()
+    arm.set_arm_speed(0.2)
 
-q = arm.neutral_position()
-arm.safe_move_to_position(q)
-arm.open_gripper()
+    print_joint_values(arm, "Initial joint values:")
 
-q = np.array([0,-1 ,0,-2,0,1,1]) # TODO: try changing this!
-arm.safe_move_to_position(q)
-arm.close_gripper()
+    arm.close_gripper()
+    q = arm.neutral_position()
+    arm.safe_move_to_position(q)
+
+    print_joint_values(arm, "Neutral joint values:")
+
+    arm.open_gripper()
+    q = np.array([0, -1, 0, -2, 0, 1, 1])
+    arm.safe_move_to_position(q)
+    arm.close_gripper()
+
+    print_joint_values(arm, "Final joint values:")
+
+if __name__ == "__main__":
+    main()
