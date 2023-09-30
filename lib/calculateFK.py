@@ -2,10 +2,13 @@ import numpy as np
 from math import pi
 
 class FK():
-
     def __init__(self):
-        # These are the DH parameters for the Franka Emika Panda robot arm
-        # They are in the order [a, alpha, d, theta]
+        # The Frankas Emika Panda robot arm has 7 joints and 8 links. Each link has an associated
+        # frame rigidly attached to it. If we consider the endeffector to be another link then we
+        # have a total of 9 frames and thus need 8 relative transformations.
+        self.num_rel_transforms = 8
+
+        # These are the DH parameters in the order [a, alpha, d, theta]
         self.dh_params = np.array([
             [0,        -pi/2,   0.333,  0],
             [0,         pi/2,   0,      0],
@@ -13,11 +16,14 @@ class FK():
             [0.0825,    pi/2,   0,      pi],
             [0,        -pi/2,   0.384,  0],
             [0.088,     pi/2,   0,      -pi],
-            [0,         0,      0.051,   -pi/4],
+            [0,         0,      0.051,  -pi/4],
             [0,         0,      0.159,  0]
         ])
         
-        # The relative joints positions are relative to the previous link frame
+        # The relative joints positions are fixed wrt the previous link's frame.
+        # e.g joint position i (rel_joint_pos[i-1]) is fixed wrt link i-1's frame
+        # Its confusing because are joints are numbered 1 t n but python is 0 indexed
+        # Note: The last joint position is the end effector's position not a joint position
         self.rel_joint_pos = np.array([
             [0,         0,  0.141,  1],
             [0,         0,  0,      1],
@@ -29,7 +35,6 @@ class FK():
             [0,         0,  0.159,  1]
         ])
 
-
     def getRelativeTransforms(self, q):
         """
         INPUT:
@@ -39,19 +44,20 @@ class FK():
         OUTPUTS:
         - relative_transforms
             8 x 4 x 4 numpy array, where each 4x4 matrix represents the
-            homogeneous transformation between a link's frame and the
-            previous link's frame. The eith matrix corresponds to the end
-            effector frame
+            homogeneous transformation from the current link's frame to the
+            next link's frame. e.g relative_frame[0] is the homogeneous
+            transformation from the base frame (link0's frame) to link1's frame.
+            Also recall that joint i moves link i and thus frame i.
         """
-        joint_angles = np.append(q, 0)  # Added a fake joint angle for the end effector
+        joint_angles = np.append(q, 0)  # Added a fake joint angle for the end effector frame
 
         relative_transforms = np.zeros((8,4,4))
 
-        for idx in range(self.dh_params.shape[0]):
-            a = self.dh_params[idx,0]
-            alpha = self.dh_params[idx,1]
-            d = self.dh_params[idx,2]
-            theta = joint_angles[idx] + self.dh_params[idx,3]
+        for idx in range(self.num_rel_transforms):
+            a       = self.dh_params[idx, 0]
+            alpha   = self.dh_params[idx, 1]
+            d       = self.dh_params[idx, 2]
+            theta   = self.dh_params[idx,3] + joint_angles[idx]
 
             relative_transforms[idx] = np.array([
                 [np.cos(theta), -np.sin(theta)*np.cos(alpha), np.sin(theta)*np.sin(alpha), a*np.cos(theta)],
@@ -77,16 +83,19 @@ class FK():
             4 x 4 homogeneous transformation matrix, representing the end effector frame expressed
             in the world frame
         """
-        relative_transforms = self.getRelativeTransforms(q)
+        relative_transforms = self.getRelativeTransforms(q)     # We have total of 8
 
-        joint_pos = np.zeros((8,4))
-        T_0_curr_joint = np.eye(4)
+        # The joint positions are 1-indexed, but python is 0-indexed so joint_pos[0] corresponds to joint 1
+        # The last joint position is the end effector's position not a joint position
+        # We add another dimension to the joint positions for homogenous transformation
+        joint_pos = np.zeros((8, 4))
+        T_0_curr_link = np.eye(4)  # Start off with the link0 (world frame's link) wrt itself
 
-        for idx in range(self.rel_joint_pos.shape[0]):
-            joint_pos[idx] = T_0_curr_joint @ self.rel_joint_pos[idx]
-            T_0_curr_joint = T_0_curr_joint @ relative_transforms[idx]
+        for idx in range(self.num_rel_transforms):
+            joint_pos[idx] = T_0_curr_link @ self.rel_joint_pos[idx]
+            T_0_curr_link = T_0_curr_link @ relative_transforms[idx]
 
-        return joint_pos[:,:3], T_0_curr_joint
+        return joint_pos[:,:3], T_0_curr_link
 
     # This code is for Lab 2, you can ignore it ofr Lab 1
     def get_axis_of_rotation(self, q):
@@ -115,15 +124,31 @@ class FK():
         # STUDENT CODE HERE: This is a function needed by lab 2
 
         return()
-    
+
+    def unitTestFK(self):
+        # First test case
+        q = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4]) # Matches figure in the handout
+        expected_end_effector_pos = np.array([0.5545, 0, 0.5215])
+        joint_positions, T0e = self.forward(q)
+        if(np.allclose(expected_end_effector_pos, T0e[:3,3])):
+            print("Test 1 Passed")
+        else:
+            print("Test 1 Failed")
+            print("Expected End Effector Position:\n",expected_end_effector_pos)
+            print("Actual End Effector Position:\n",T0e[:3,3])
+
+        # Second test case
+        q = np.array([0, pi/2, 0, 0, 0, pi/2, pi/4]) # Matches figure in the handout
+        expected_end_effector_pos = np.array([0.788, 0, 0.123])
+        joint_positions, T0e = self.forward(q)
+        if(np.allclose(expected_end_effector_pos, T0e[:3,3])):
+            print("Test 2 Passed")
+        else:
+            print("Test 2 Failed")
+            print("Expected End Effector Position:\n",expected_end_effector_pos)
+            print("Actual End Effector Position:\n",T0e[:3,3])
+        
+
 if __name__ == "__main__":
-
     fk = FK()
-
-    # Matches figure in the handout
-    q = np.array([0,0,0,-pi/2,0,pi/2,pi/4])
-
-    joint_positions, T0e = fk.forward(q)
-    
-    print("Joint Positions:\n",joint_positions)
-    print("End Effector Pose:\n",T0e)
+    fk.unitTestFK()
