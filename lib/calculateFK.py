@@ -13,7 +13,8 @@ class FK():
             [0.0825,    pi/2,   0,      pi],
             [0,        -pi/2,   0.384,  0],
             [0.088,     pi/2,   0,      -pi],
-            [0,         0,      0.21,   -pi/4]
+            [0,         0,      0.051,   -pi/4],
+            [0,         0,      0.159,  0]
         ])
         
         # The relative joints positions are relative to the previous link frame
@@ -25,6 +26,7 @@ class FK():
             [0,         0,  0.125,  1],
             [0,         0, -0.015,  1],
             [0,         0,  0.051,  1],
+            [0,         0,  0.159,  1]
         ])
 
 
@@ -36,17 +38,20 @@ class FK():
 
         OUTPUTS:
         - relative_transforms
-            7 x 4 x 4 numpy array, where each 4x4 matrix represents the
+            8 x 4 x 4 numpy array, where each 4x4 matrix represents the
             homogeneous transformation between a link's frame and the
-            previous link's frame. The first index indicates the link
+            previous link's frame. The eith matrix corresponds to the end
+            effector frame
         """
-        relative_transforms = np.zeros((7,4,4))
+        joint_angles = np.append(q, 0)  # Added a fake joint angle for the end effector
+
+        relative_transforms = np.zeros((8,4,4))
 
         for idx in range(self.dh_params.shape[0]):
             a = self.dh_params[idx,0]
             alpha = self.dh_params[idx,1]
             d = self.dh_params[idx,2]
-            theta = q[idx] + self.dh_params[idx,3]
+            theta = joint_angles[idx] + self.dh_params[idx,3]
 
             relative_transforms[idx] = np.array([
                 [np.cos(theta), -np.sin(theta)*np.cos(alpha), np.sin(theta)*np.sin(alpha), a*np.cos(theta)],
