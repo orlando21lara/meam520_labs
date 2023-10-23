@@ -26,7 +26,9 @@ def IK_velocity(q_in, v_in, omega_in):
     processed_jacobian = J[~np.isnan(Xi)]
     processed_Xi = Xi[~np.isnan(Xi)].reshape(-1,1)
     dq = np.linalg.lstsq(processed_jacobian, processed_Xi)
-    dq = np.array(dq[0]).reshape((1,7))
+    # dq = np.array(dq[0]).reshape((1,7))
+    dq = np.array(dq[0])
+    dq = dq.flatten()
     return dq
 
 if __name__ == "__main__":
