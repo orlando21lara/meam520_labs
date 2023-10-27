@@ -24,6 +24,11 @@ class JacobianDemo():
     counter = 0
     x0 = np.array([0.307, 0, 0.487]) # corresponds to neutral position
     last_iteration_time = None
+    time_stamps = []
+    des_pos_over_time = []
+    des_vel_over_time = []
+    real_pos_over_time = []
+    commanded_vel_over_time = []
 
     ##################
     ## TRAJECTORIES ##
@@ -78,7 +83,7 @@ class JacobianDemo():
 
         return xdes, vdes
 
-    def line(t,f=1,L=.2):
+    def line(t, f=1/5, L=0.2):
         """
         Calculate the position and velocity of the line trajector
 
@@ -91,13 +96,13 @@ class JacobianDemo():
         xdes = 0x3 np array of target end effector position in the world frame
         vdes = 0x3 np array of target end effector linear velocity in the world frame
         """
-        ## STUDENT CODE GOES HERE
+        # Create a triangle wave that spans the range [0, 1] and period 1/f
+        sign = (-1) ** np.floor(2 * t * f)
+        alpha = 2 * np.abs(t * f - np.floor(t * f + 0.5))
 
-        # TODO: replace these!
-        xdes = JacobianDemo.x0
-        vdes = np.array([0,0,0])
-
-        ## END STUDENT CODE
+        x0 = np.array([0.307, 0, 0.487]) # corresponds to neutral position
+        xdes = x0 + np.array([L * alpha, 0, 0])
+        vdes = np.array([L * f* sign, 0, 0])
 
         return xdes, vdes
 
@@ -121,7 +126,6 @@ class JacobianDemo():
     def follow_trajectory(self, state, trajectory):
 
         if self.active:
-
             try:
                 t = time_in_seconds() - self.start_time
 
@@ -133,9 +137,17 @@ class JacobianDemo():
                 joints, T0e = self.fk.forward(q)
                 x = (T0e[0:3,3])
 
+
                 # First Order Integrator, Proportional Control with Feed Forward
-                kp = 3
+                kp = 20
                 v = vdes + kp * (xdes - x)
+
+                # Store trajectory data
+                self.time_stamps.append(t)
+                self.real_pos_over_time.append(x)
+                self.des_pos_over_time.append(xdes)
+                self.des_vel_over_time.append(vdes)
+                self.commanded_vel_over_time.append(v)
 
                 # Velocity Inverse Kinematics
                 dq = IK_velocity(q,v,np.array([np.nan,np.nan,np.nan]))
@@ -192,3 +204,32 @@ if __name__ == "__main__":
     JD.start_time = time_in_seconds()
 
     input("Press Enter to stop")
+    JD.active = False
+    
+    # Plot the trajectory data
+    smallest_len = min(len(JD.time_stamps), len(JD.real_pos_over_time), len(JD.des_pos_over_time), len(JD.des_vel_over_time), len(JD.commanded_vel_over_time))
+    time_stamps = np.asarray(JD.time_stamps[:smallest_len])
+    real_pos_over_time = np.asarray(JD.real_pos_over_time[:smallest_len])
+    des_pos_over_time = np.asarray(JD.des_pos_over_time[:smallest_len])
+    des_vel_over_time = np.asarray(JD.des_vel_over_time[:smallest_len])
+    commanded_vel_over_time = np.asarray(JD.commanded_vel_over_time[:smallest_len])
+
+    pos_error = des_pos_over_time - real_pos_over_time
+    squared_error = pos_error ** 2
+    mean_squared_error = np.mean(squared_error, axis=0)
+    print("Mean Squared Error: ", mean_squared_error)
+
+    fig, ax = plt.subplots()
+    
+    ax.plot(time_stamps, real_pos_over_time[:, 0], label='Real X-Position', linestyle='-')
+    ax.plot(time_stamps, des_pos_over_time[:, 0], label='Desired X-Position', linestyle='--')
+    ax.plot(time_stamps, des_vel_over_time[:, 0], label='Desired X-Velocity', linestyle='--')
+    ax.plot(time_stamps, commanded_vel_over_time[:, 0], label='Commanded X-Velocity', linestyle='--')
+    ax.set_xlabel('Time (s)')
+    ax.set_ylabel('X-Position (m) and X-Velocity (m/s)')
+    ax.legend()
+    ax.grid(True)
+
+
+    plt.show()
+    
