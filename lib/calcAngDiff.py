@@ -19,7 +19,42 @@ def calcAngDiff(R_des, R_curr):
     the current frame to the end effector frame. The magnitude of this vector
     must be sin(angle), where angle is the angle of rotation around this axis
     """
-    omega = np.zeros(3)
-    ## STUDENT CODE STARTS HERE
+    r_err = R_curr.T @ R_des
+    r_err_skew = 0.5 * (r_err - r_err.T)
+    omega = np.array([r_err_skew[2, 1],
+                      r_err_skew[0, 2],
+                      r_err_skew[1, 0]])
+    omega = R_curr @ omega
 
     return omega
+
+def printOmega(omega):
+    print("Omega: ", omega)
+    magnitude = np.linalg.norm(omega)
+    direction = omega / np.linalg.norm(omega)
+    print("Magnitude: ", magnitude)
+    print("Direction: ", direction)
+
+    return magnitude, direction
+
+def main():
+    # 30 degrees about x
+    deg1 = np.pi / 6
+    deg2 = np.pi / 4
+    r_curr = np.array([[1.0, 0.0, 0.0],
+                       [0.0, np.cos(deg1), -np.sin(deg1)],
+                       [0.0, np.sin(deg1), np.cos(deg1)]])
+    # 45 degrees about x
+    r_des = np.array([[1.0, 0.0, 0.0],
+                      [0.0, np.cos(deg2), -np.sin(deg2)],
+                      [0.0, np.sin(deg2), np.cos(deg2)]])
+    omega = calcAngDiff(r_des, r_curr)
+    mag, dir = printOmega(omega)
+
+    expect_direction = np.array([1, 0, 0])
+    expected_magnitude = np.sin(deg2 - deg1)
+    assert(np.all(expect_direction == dir))
+    assert(np.isclose(expected_magnitude, mag))
+
+if __name__ == "__main__":
+    main()
