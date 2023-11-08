@@ -67,11 +67,9 @@ class IK:
         must be sin(angle), where angle is the angle of rotation around this axis
         """
 
-        ## STUDENT CODE STARTS HERE
-        displacement = np.zeros(3)
-        axis = np.zeros(3)
+        displacement = target[:3,3] - current[:3,3] # position of target - position of current
+        axis = calcAngDiff(current, target) # angle of rotation from current to target
 
-        ## END STUDENT CODE
         return displacement, axis
 
     @staticmethod
@@ -95,11 +93,14 @@ class IK:
         angle - the angle in radians between the orientations of G & H
         """
         
-        ## STUDENT CODE STARTS HERE
-        distance = 0
-        angle = 0
+        distance = G[:3,3] - H[:3,3]
 
-        ## END STUDENT CODE
+        axis = calcAngDiff(G, H)
+        mag = np.linalg.norm(axis)  # sin(angle)
+        mag = np.clip(mag, -1, 1)   # avoid numerical errors
+        mag = np.arcsin(mag)        # angle
+        angle = np.abs(mag)
+
         return distance, angle
 
     def is_valid_solution(self,q,target):
@@ -118,12 +119,55 @@ class IK:
         angular tolerances of the target pose, and also respects the joint
         limits.
         """
+        _, sol_pose = self.fk.forward(q)
 
-        ## STUDENT CODE STARTS HERE
         success = False
-        message = "Solution found/not found + reason"
+        # message = "Solution found/not found + reason"
+        message = ""
+        joint_check_pass = False
+        dist_check_pass = False
+        angle_check_pass = False
 
-        ## END STUDENT CODE
+        msg_joint_check = ""
+        msg_dist_check = ""
+        msg_angle_check = ""
+
+        # Check that joint angles are within limits
+        if np.any(q < IK.lower) or np.any(q > IK.upper):
+            msg_joint_check = "Joint angles are NOT within limits"
+            joint_check_pass = False
+        else:
+            msg_joint_check = "Joint angle limits PASS"
+            joint_check_pass = True
+        
+        # Check that end effector position is within linear tolerance
+        dist, _ = IK.distance_and_angle(target, sol_pose)
+        if np.linalg.norm(dist) > self.linear_tol:
+            msg_dist_check = "End effector position is NOT within linear tolerance"
+            dist_check_pass = False
+        else:
+            msg_dist_check = "End effector linear position tolerance PASS"
+            dist_check_pass = True
+        
+        # Check that end effector orientation is within angular tolerance
+        _, ang = IK.distance_and_angle(target, sol_pose)
+        if ang > self.angular_tol:
+            msg_angle_check = "End effector orientation is NOT within angular tolerance"
+            angle_check_pass = False
+        else:
+            msg_angle_check = "End effector angular orientation tolerance PASS"
+            angle_check_pass = True
+
+        # Check if all checks passed
+        if joint_check_pass and dist_check_pass and angle_check_pass:
+            success = True
+            message = "Solution found"
+        else:
+            success = False
+            message = "Solution NOT found"
+        
+        message += "\n\t" + msg_joint_check + "\n\t" + msg_dist_check + "\n\t" + msg_angle_check
+
         return success, message
 
     ####################
@@ -261,7 +305,7 @@ if __name__ == "__main__":
         d, ang = IK.distance_and_angle(target,pose)
         print('iteration:',i,' q =',q_pseudo, ' d={d:3.4f}  ang={ang:3.3f}'.format(d=d,ang=ang))
 
-    # Using pseudo-inverse 
+    # Using transpose
     q_trans, rollout_trans, success_trans, message_trans = ik.inverse(target, seed, method='J_trans', alpha=.5)
 
     for i, q_trans in enumerate(rollout_trans):
