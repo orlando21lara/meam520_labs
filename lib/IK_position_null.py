@@ -5,7 +5,7 @@ from scipy.linalg import null_space
 from lib.calcJacobian import calcJacobian
 from lib.calculateFK import FK
 from lib.calcAngDiff import calcAngDiff
-# from lib.IK_velocity import IK_velocity  #optional
+from lib.IK_velocity_null import IK_velocity_null
 
 
 class IK:
@@ -68,7 +68,7 @@ class IK:
         """
 
         displacement = target[:3,3] - current[:3,3] # position of target - position of current
-        axis = calcAngDiff(current, target) # angle of rotation from current to target
+        axis = calcAngDiff(current[:3,:3], target[:3,:3]) # angle of rotation from current to target
 
         return displacement, axis
 
@@ -93,9 +93,10 @@ class IK:
         angle - the angle in radians between the orientations of G & H
         """
         
-        distance = G[:3,3] - H[:3,3]
+        displacement, axis = IK.displacement_and_axis(G, H)
 
-        axis = calcAngDiff(G, H)
+        distance = np.linalg.norm(displacement)
+
         mag = np.linalg.norm(axis)  # sin(angle)
         mag = np.clip(mag, -1, 1)   # avoid numerical errors
         mag = np.arcsin(mag)        # angle
@@ -140,8 +141,9 @@ class IK:
             msg_joint_check = "Joint angle limits PASS"
             joint_check_pass = True
         
+        dist, ang = IK.distance_and_angle(target, sol_pose)
+
         # Check that end effector position is within linear tolerance
-        dist, _ = IK.distance_and_angle(target, sol_pose)
         if np.linalg.norm(dist) > self.linear_tol:
             msg_dist_check = "End effector position is NOT within linear tolerance"
             dist_check_pass = False
@@ -150,7 +152,6 @@ class IK:
             dist_check_pass = True
         
         # Check that end effector orientation is within angular tolerance
-        _, ang = IK.distance_and_angle(target, sol_pose)
         if ang > self.angular_tol:
             msg_angle_check = "End effector orientation is NOT within angular tolerance"
             angle_check_pass = False
@@ -184,7 +185,7 @@ class IK:
         INPUTS:
         q - the current joint configuration, a "best guess" so far for the final answer
         target - a 4x4 numpy array containing the desired end effector pose
-        method - a boolean variable that determines to use either 'J_pseudo' or 'J_trans' 
+        method - a string variable that determines to use either 'J_pseudo' or 'J_trans' 
         (J pseudo-inverse or J transpose) in your algorithm
         
         OUTPUTS:
@@ -192,10 +193,23 @@ class IK:
         decay to zero magnitude as the task is achieved
         """
 
-        ## STUDENT CODE STARTS HERE
         dq = np.zeros(7)
+        displacement, axis = IK.displacement_and_axis(target, IK.fk.forward(q)[1])
 
-        ## END STUDENT CODE
+        J = calcJacobian(q)
+        J_method = None
+        if method == "J_pseudo":
+            J_method = np.linalg.pinv(J)
+        elif method == "J_trans":
+            J_method = J.T
+        else:
+            raise ValueError("Invalid method for end_effector_task")
+
+        # IMPORTANT: note that the error vector is current_postion - target_position, but the displacement vector is target_position - current_position
+        # so we need to negate it
+        error = np.concatenate((-displacement, axis), axis=None)
+        dq = J_method @ error
+
         return dq
 
     @staticmethod
@@ -250,31 +264,33 @@ class IK:
 
         q = seed
         rollout = []
+        num_steps = 0
 
-        ## STUDENT CODE STARTS HERE
-
-        
         ## gradient descent:
         while True:
             rollout.append(q)
 
             # Primary Task - Achieve End Effector Pose
-            dq_ik = IK.end_effector_task(q,target, method)
+            dq_ik = IK.end_effector_task(q, target, method)
 
             # Secondary Task - Center Joints
             dq_center = IK.joint_centering_task(q)
+            J = calcJacobian(q)
+            pseudo_inv_J = np.linalg.pinv(J)
+            null_J = np.eye(7) - (pseudo_inv_J @ J)
 
             ## Task Prioritization
+            dq_full = -alpha * dq_ik + (null_J @ dq_center)
 
             # Check termination conditions
-            break
+            if num_steps >= self.max_steps or np.linalg.norm(dq_full) < self.min_step_size:
+                break
 
-            # update q
+            # Update variables
+            q = q + dq_full
+            num_steps += 1
             
-
-        ## END STUDENT CODE
-
-        success, message = self.is_valid_solution(q,target)
+        success, message = self.is_valid_solution(q, target)
         return q, rollout, success, message
 
 ################################
@@ -298,7 +314,7 @@ if __name__ == "__main__":
     ])
 
     # Using pseudo-inverse 
-    q_pseudo, rollout_pseudo, success_pseudo, message_pseudo = ik.inverse(target, seed, method='J_pseudo', alpha=.5)
+    q_pseudo, rollout_pseudo, success_pseudo, message_pseudo = ik.inverse(target, seed, method='J_pseudo', alpha=0.5)
 
     for i, q_pseudo in enumerate(rollout_pseudo):
         joints, pose = ik.fk.forward(q_pseudo)
@@ -306,7 +322,7 @@ if __name__ == "__main__":
         print('iteration:',i,' q =',q_pseudo, ' d={d:3.4f}  ang={ang:3.3f}'.format(d=d,ang=ang))
 
     # Using transpose
-    q_trans, rollout_trans, success_trans, message_trans = ik.inverse(target, seed, method='J_trans', alpha=.5)
+    q_trans, rollout_trans, success_trans, message_trans = ik.inverse(target, seed, method='J_trans', alpha=0.5)
 
     for i, q_trans in enumerate(rollout_trans):
         joints, pose = ik.fk.forward(q_trans)
