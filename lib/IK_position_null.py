@@ -68,7 +68,7 @@ class IK:
         """
 
         displacement = target[:3,3] - current[:3,3] # position of target - position of current
-        axis = calcAngDiff(current[:3,:3], target[:3,:3]) # angle of rotation from current to target
+        axis = calcAngDiff(target[:3,:3], current[:3,:3]) # angle of rotation from current to target
 
         return displacement, axis
 
@@ -144,7 +144,7 @@ class IK:
         dist, ang = IK.distance_and_angle(target, sol_pose)
 
         # Check that end effector position is within linear tolerance
-        if np.linalg.norm(dist) > self.linear_tol:
+        if np.abs(dist) > self.linear_tol:
             msg_dist_check = "End effector position is NOT within linear tolerance"
             dist_check_pass = False
         else:
@@ -152,7 +152,7 @@ class IK:
             dist_check_pass = True
         
         # Check that end effector orientation is within angular tolerance
-        if ang > self.angular_tol:
+        if np.abs(ang) > self.angular_tol:
             msg_angle_check = "End effector orientation is NOT within angular tolerance"
             angle_check_pass = False
         else:
@@ -207,7 +207,7 @@ class IK:
 
         # IMPORTANT: note that the error vector is current_postion - target_position, but the displacement vector is target_position - current_position
         # so we need to negate it
-        error = np.concatenate((-displacement, axis), axis=None)
+        error = -np.concatenate((displacement, axis), axis=None)
         dq = J_method @ error
 
         return dq
