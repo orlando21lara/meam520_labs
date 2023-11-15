@@ -10,6 +10,7 @@ from tf.transformations import quaternion_from_matrix
 from core.interfaces import ArmController
 from core.utils import time_in_seconds
 
+from lib.IK_velocity import IK_velocity
 from lib.IK_velocity_null import IK_velocity_null
 from lib.calculateFK import FK
 from lib.calcAngDiff import calcAngDiff
@@ -60,7 +61,7 @@ class JacobianDemo():
     ## TRAJECTORIES ##
     ##################
 
-    def eight(t,fx=0.3,fy=0.6,rx=.1,ry=.1):
+    def eight(t,fx=1.0,fy=2.0,rx=.1,ry=.1):
         """
         Calculate the position and velocity of the figure 8 trajector
 
@@ -89,7 +90,7 @@ class JacobianDemo():
 
         return Rdes, ang_vdes, xdes, vdes
 
-    def ellipse(t,f=0.5,ry=.15,rz=.10):
+    def ellipse(t,f=1.5,ry=.15,rz=.10):
         """
         Calculate the position and velocity of the figure ellipse trajector
 
@@ -111,15 +112,16 @@ class JacobianDemo():
         ## STUDENT CODE GOES HERE
 
         # TODO: replace these!
-        xdes = JacobianDemo.x0+np.array([0,ry-ry*cos(f*t), rz*sin(f*t)])
-        vdes = np.array([0,ry*f*sin(f*t), rz*f*cos(f*t)])
+        xdes = JacobianDemo.x0+np.array([ry-ry*cos(f*t), rz*sin(f*t), 0])
+        vdes = np.array([ry*f*sin(f*t), rz*f*cos(f*t), 0])
+        # Rotate about X-axis by 30 degrees
         Rdes = np.diag([1., -1., -1.])
         ang_vdes = 0.0 * np.array([1.0, 0.0, 0.0])
         ## END STUDENT CODE
         
         return Rdes, ang_vdes, xdes, vdes
 
-    def line(t,f=0.1,L=.15):
+    def line(t,f=0.5,L=.15):
         """
         Calculate the position and velocity of the line trajector
 
@@ -240,6 +242,7 @@ class JacobianDemo():
 
                 # Velocity Inverse Kinematics
                 dq = IK_velocity_null(q,v, omega, - k0 * (q - q_e)).flatten()
+                # dq = IK_velocity(q,v, omega).flatten()
 
                 # Visualize 
                 if self.visulaize_mani_ellipsoid:
