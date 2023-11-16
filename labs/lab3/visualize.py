@@ -139,7 +139,10 @@ def transform(d,rpy):
 # sequence of successive rotations around z, y, and x. You are free to use these
 # to generate your own tests, or directly write out transforms you wish to test.
 
-"""targets = [
+
+"""
+# Provided Targets
+targets = [
     transform( np.array([-.2, -.3, .5]), np.array([0,pi,pi])            ),
     transform( np.array([-.2, .3, .5]),  np.array([pi/6,5/6*pi,7/6*pi]) ),
     transform( np.array([.5, 0, .5]),    np.array([0,pi,pi])            ),
@@ -151,35 +154,20 @@ def transform(d,rpy):
     transform( np.array([.5, 0, 0.2]),   np.array([0,pi-pi/2,pi])       ),
     transform( np.array([.4, 0, 0.2]),   np.array([pi/2,pi-pi/2,pi])    ),
     ]
-    """
-#New targets
-targets = [
-    transform( np.array([0.2, 0.3, 0.5]),  np.array([0, pi/2, pi]) ), #s
-    # transform( np.array([0.2, 0.3, 0.5]),  np.array([pi, 0, pi]) ), #s
-    transform( np.array([0.2, 0.3, -0.5]),  np.array([pi, 0, pi]) ), #s
-    transform( np.array([0.2, -0.3, 0.3]),  np.array([pi, pi/2, pi]) ), #s
+"""
 
-    # transform( np.array([0.3, 0.2, 0.5]),  np.array([0, 0, 0]) ), #s
-    # transform( np.array([0.2, 0, 0.5]),  np.array([0, 0, -pi/2]) ), #f
-    # transform( np.array([0.2, 0, 0.5]),  np.array([0, -pi/2, 0]) ), #f
-    # transform( np.array([0.2, 0, 0.5]),  np.array([-pi/2, 0, 0]) ), #s
-    # transform( np.array([0, 0, 0.9]),  np.array([0, -pi/3, -pi/2]) ), #s
-    # transform( np.array([0.9, 0, 0]),  np.array([0, -pi/3, pi/2]) ), #i
-    # transform( np.array([0, 0.9, 0]),  np.array([0, -pi/3, pi/2]) ), #i
-    # transform( np.array([0.3, -0.3, 0.4]), np.array([-2.8973, 2.897, 2.897]) ), #s
-    # transform( np.array([0.6, -0.5, 0.4]), np.array([-2.8973, 2.897, 2.897]) ),#s
-    # transform( np.array([0.4, 0.3, 0.6]), np.array([-2.8973, -2.897, 2.897]) ),#s
-    # transform( np.array([0.3, -0.3, 0.4]), np.array([pi/4, pi/3, pi/2]) ), # sucess
-    # transform( np.array([0.3, 0.3, 0.6]),  np.array([-pi/4, -pi/3, -pi/2]) ),# failed
-    
-    # transform( np.array([0.1, -0.4, 0.7]), np.array([pi/6, pi/2, -pi/4]) ), #s
-    # transform( np.array([-0.3, 0.2, 0.5]), np.array([pi/3, -pi/4, pi]) ), #f
-    # transform( np.array([-0.2, -0.5, 0.3]), np.array([pi/2, pi/6, -pi/6]) ), #f
-    # transform( np.array([0.4, 0.0, 0.8]),  np.array([-pi/3, pi/3, pi/4]) ),#s
-    # transform( np.array([0.0, 0.5, 0.3]),  np.array([pi, -pi/2, pi/3]) ),#f
-    # transform( np.array([-0.5, 0.1, 0.6]), np.array([-pi/6, -pi/4, pi/2]) ),#f
-    # transform( np.array([0.2, -0.6, 0.4]), np.array([pi/3, pi, pi/6]) ), #i
-    # transform( np.array([-0.1, 0.4, 0.7]), np.array([-pi/4, pi/2, -pi/3]) ), #f
+# New targets
+targets = [
+    transform( np.array([0.2, 0.3, 0.5]),   np.array([0, pi/2, pi]) ),          # p: s, t: s
+    transform( np.array([0.2, 0.3, 0.5]),   np.array([pi, 0, pi]) ),            # p: s, t: s
+    transform( np.array([0.2, -0.3, 0.3]),  np.array([pi, pi/2, pi]) ),         # p: s, t: s
+    transform( np.array([0.4, 0.4, 0.4]),   np.array([pi, pi/2, pi]) ),         # p: s, t: f
+    transform( np.array([0.1, 0.1, 0.2]),   np.array([pi/2, pi/2, pi/2]) ),     # p: s, t: s
+    transform( np.array([0.2, 0.0, 0.3]),   np.array([pi/2, -pi/2, 0]) ),       # p: f, t: f
+    transform( np.array([0.2, 0.0, 0.3]),   np.array([pi/2, pi/2, 0]) ),        # p: s, t: s
+    transform( np.array([0.2, 0.0, 0.4]),   np.array([pi/3, pi/3, pi/3]) ),     # p: s, t: s
+    transform( np.array([0.1, 0.0, 0.4]),   np.array([pi/3, pi, pi/6]) ),       # p: s, t: s
+    transform( np.array([0.4, 0.0, 0.7]),   np.array([pi/2, -pi/2, pi/2]) ),    # p: s, t: f
 ]
 
 
@@ -206,7 +194,7 @@ def testTargets(arm, method=''):
         seed = arm.neutral_position() # use neutral configuration as seed
 
         start = perf_counter()
-        q, rollout, success, message = ik.inverse(target, seed, method='J_pseudo', alpha=.5)  #try both methods
+        q, rollout, success, message = ik.inverse(target, seed, method=method, alpha=.5)  #try both methods
         stop = perf_counter()
         dt = stop - start
         
@@ -262,28 +250,31 @@ def main():
     seed = arm.neutral_position()
     arm.safe_move_to_position(seed)
 
-    print("####################################")
+    print("\n####################################")
     print("TEST FOR PSEUDO METHOD")
     print("####################################")
     pseudo_solve_times, pseudo_iterations, pseudo_num_success = testTargets(arm, "J_pseudo")
 
-    print("####################################")
-    print("STATISTICS FOR PSEUDO METHOD")
-    print("####################################")
-    computeStatistics(pseudo_solve_times, pseudo_iterations, pseudo_num_success)
-    
+    input("Press Enter to Test Transpose Method")
 
-    print("####################################")
+    print("\n####################################")
     print("TEST FOR TRANSPOSE METHOD")
     print("####################################")
     trans_solve_times, trans_iterations, trans_num_success = testTargets(arm, "J_trans")
+    
 
+    input("Press Enter to Print Statistics")
+
+    print("\n####################################")
+    print("STATISTICS FOR PSEUDO METHOD")
     print("####################################")
+    computeStatistics(pseudo_solve_times, pseudo_iterations, pseudo_num_success)
+
+    print("\n####################################")
     print("STATISTICS FOR TRANS METHOD")
     print("####################################")
     computeStatistics(trans_solve_times, trans_iterations, trans_num_success)
     
-    # Compute Statistics
 
 if __name__ == "__main__":
     main()
