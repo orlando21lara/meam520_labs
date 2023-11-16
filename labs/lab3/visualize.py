@@ -157,7 +157,7 @@ targets = [
 """
 
 # New targets
-targets = [
+test_targets = [
     transform( np.array([0.2, 0.3, 0.5]),   np.array([0, pi/2, pi]) ),          # p: s, t: s
     transform( np.array([0.2, 0.3, 0.5]),   np.array([pi, 0, pi]) ),            # p: s, t: s
     transform( np.array([0.2, -0.3, 0.3]),  np.array([pi, pi/2, pi]) ),         # p: s, t: s
@@ -170,17 +170,26 @@ targets = [
     transform( np.array([0.4, 0.0, 0.7]),   np.array([pi/2, -pi/2, pi/2]) ),    # p: s, t: f
 ]
 
+completeness_targets = [
+    transform( np.array([0.5, 0.3, 0.3]),   np.array([pi/2, 0, 0]) ),           # p: f, t: f
+    transform( np.array([0.5, 0.3, 0.3]),   np.array([pi/2, -pi/2, 0]) ),       # p: f, t: f
+    transform( np.array([0.5, 0.2, 0.3]),   np.array([pi/2, -pi/2, 0]) ),       # p: f, t: f
+]
+
 
 ####################
 ## Test Execution ##
 ####################
 
-def testTargets(arm, method=''):
+def testTargets(arm, targets, method='', use_previous_q_as_seed=False):
     assert method == 'J_pseudo' or method == 'J_trans', "Not a valid method for Numerical IK: 'J_pseudo' or 'J_trans'"
 
     solve_times = []
     iterations = []
     num_success = 0
+
+    seed = arm.neutral_position() # use neutral configuration as seed
+    input("Arm moved to Neutral Position, press enter to proceed to testing")
 
     # Iterates through the given targets, using your IK solution
     # Try editing the targets list above to do more testing!
@@ -191,12 +200,15 @@ def testTargets(arm, method=''):
         print("Solving... ")
         show_pose(target,"target")
 
-        seed = arm.neutral_position() # use neutral configuration as seed
-
         start = perf_counter()
         q, rollout, success, message = ik.inverse(target, seed, method=method, alpha=.5)  #try both methods
         stop = perf_counter()
         dt = stop - start
+
+        if use_previous_q_as_seed:
+            seed = q
+        else:
+            seed = arm.neutral_position()
         
         # Store time and iteration data
         solve_times.append(dt)
@@ -253,14 +265,14 @@ def main():
     print("\n####################################")
     print("TEST FOR PSEUDO METHOD")
     print("####################################")
-    pseudo_solve_times, pseudo_iterations, pseudo_num_success = testTargets(arm, "J_pseudo")
+    pseudo_solve_times, pseudo_iterations, pseudo_num_success = testTargets(arm, test_targets, "J_pseudo")
 
     input("Press Enter to Test Transpose Method")
 
     print("\n####################################")
     print("TEST FOR TRANSPOSE METHOD")
     print("####################################")
-    trans_solve_times, trans_iterations, trans_num_success = testTargets(arm, "J_trans")
+    trans_solve_times, trans_iterations, trans_num_success = testTargets(arm, test_targets, "J_trans")
     
 
     input("Press Enter to Print Statistics")
@@ -274,6 +286,11 @@ def main():
     print("STATISTICS FOR TRANS METHOD")
     print("####################################")
     computeStatistics(trans_solve_times, trans_iterations, trans_num_success)
+
+    print("\n####################################")
+    print("Testing for Algorithmic Completeness")
+    print("####################################")
+    testTargets(arm, completeness_targets, "J_pseudo", True)
     
 
 if __name__ == "__main__":
