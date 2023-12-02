@@ -135,8 +135,18 @@ class IK:
 
         # Check that joint angles are within limits
         if np.any(q < IK.lower) or np.any(q > IK.upper):
-            msg_joint_check = "Joint angles are NOT within limits"
-            joint_check_pass = False
+            # Try to fix this by just rotating the wrist by pi
+            if q[-1] > IK.upper[-1]:
+                q[-1] -= pi
+            elif q[-1] < IK.lower[-1]:
+                q[-1] += pi
+
+            if np.any(q < IK.lower) or np.any(q > IK.upper):
+                msg_joint_check = "Joint angles are NOT within limits"
+                joint_check_pass = False
+            else:
+                msg_joint_check = "Joint angle limits PASS"
+                joint_check_pass = True
         else:
             msg_joint_check = "Joint angle limits PASS"
             joint_check_pass = True

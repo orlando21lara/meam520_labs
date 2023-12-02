@@ -38,9 +38,16 @@ class BlockStacker:
         self.ik = ik
 
         self.q_static_table_view = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
-        self.q_stack_base = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
-
         self.H_world_static_table_view = self.fk.forward(self.q_static_table_view)[1]
+
+        self.stack_base_z = .225
+        self.H_world_stack_base = deepcopy(self.H_world_static_table_view)
+        self.H_world_stack_base[:3, 3] = np.array([0.562, -0.135, self.stack_base_z])
+        self.seed = deepcopy(self.H_world_stack_base)
+        self.seed[1, 3] = .135
+
+        self.q_stack_base, _, _, _ = self.ik.inverse(self.H_world_stack_base, self.q_static_table_view, "J_pseudo", 0.5)
+        self.q_seed, _, _, _ = self.ik.inverse(self.seed, self.q_static_table_view, "J_pseudo", 0.5)
 
         self.H_ee_camera = self.detector.get_H_ee_camera()
         self.H_world_ee = np.eye(4)
@@ -111,45 +118,55 @@ class BlockStacker:
             block_changed = self.change_axis(H_world_block)
 
             self.static_blocks.append((name, block_changed))
+        
+        self.static_blocks.sort(key=lambda x: x[1][1, 3], reverse=False)
 
     def stackStaticBlocks(self):
-        x = deepcopy(self.H_world_static_table_view)
-        x[:3, 3] = np.array([0.562, -0.259, 0.25])
+        H_current_stack = deepcopy(self.H_world_stack_base)
+        
+        for (name, H_block) in self.static_blocks:
+            # Move above the block
+            H_target = deepcopy(H_block)
+            H_target[2, 3] += 0.1
 
-        show_pose(x, "stacking_base", "world")
-
-        self.q_stack_base, _, success, _ = self.ik.inverse(x, self.q_static_table_view, "J_pseudo", 0.5)
-        if not success:
-            print("AHHHHHHHHHHHH!!")
-            return
-
-        # Move to the first block
-        H_target = deepcopy(self.static_blocks[0][1])    # Transform of first block (with modified orientation) wrt world frame
-        H_target[2, 3] += 0.1
-
-        q_solution, _, success, message = self.ik.inverse(H_target, self.q_static_table_view, "J_pseudo", 0.5)
-        H_solution = self.fk.forward(q_solution)[1]
-        if success:
-            self.arm.safe_move_to_position(q_solution)
-
-            H_target = self.static_blocks[0][1]    # Transform of first block (with modified orientation) wrt world frame
-
-            q_solution, _, success, message = self.ik.inverse(H_target, q_solution, "J_pseudo", 0.5)
-            H_solution = self.fk.forward(q_solution)[1]
-
+            q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
             if success:
-                print("Attempting to grasp {block}".format(block=self.static_blocks[0][0]))
+                print("Attempting to move above block", name)
+                # Attempting to move above the block
                 self.arm.safe_move_to_position(q_solution)
-                self.arm.close_gripper()
-                print("Closed Gripper")
-                print("YAY :)")
-                self.arm.safe_move_to_position(self.q_stack_base)
-                self.arm.open_gripper()
-                self.arm.safe_move_to_position(self.q_static_table_view)
+
+                H_target = H_block      # New target is the pose of the block
+
+                # Solving for the grasping position
+                q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
+
+                if success:
+                    # Attempting to move to grasping position
+                    self.arm.safe_move_to_position(q_solution)
+                    self.arm.close_gripper()
+
+                    """ Now that the block is grasped we will move on to stacking it"""
+                    # Move to position above the stack
+                    H_current_stack[2, 3] += 0.05
+                    q_stack_above, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
+                    self.arm.safe_move_to_position(q_stack_above)
+
+                    # Move down to drop the block
+                    H_current_stack[2, 3] -= 0.04
+                    q_stack, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
+                    self.arm.safe_move_to_position(q_stack)
+                    self.arm.open_gripper()
+
+                    # Move back above the stack
+                    self.arm.safe_move_to_position(q_stack_above)
+                    
+                    # Update the stack position
+                    H_current_stack[2, 3] += 0.04
+                else:
+                    print("Failed to move to grasping position")
             else:
-                print("Failed to move to grasping position")
-        else:
-            print("Failed to move above block")
+                print("Failed to move above block")
+
 
 def main():
     try:
@@ -188,8 +205,6 @@ def main():
     block_stacker.moveToStaticTableView()
     block_stacker.detectStaticBlocks()
     block_stacker.stackStaticBlocks()
-
-
 
 
 if __name__ == "__main__":
