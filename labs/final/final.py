@@ -1,9 +1,9 @@
+# Python modules
 import sys
 import numpy as np
 from copy import deepcopy
 from math import pi
 
-import rospy
 # Common interfaces for interacting with both the simulation and real environments!
 from core.interfaces import ArmController
 from core.interfaces import ObjectDetector
@@ -11,21 +11,23 @@ from core.interfaces import ObjectDetector
 # for timing that is consistent with simulation or real time as appropriate
 from core.utils import time_in_seconds
 
-# import modules from lib folder
+# Personal modules
 from lib.calculateFK import FK
 from lib.IK_position_null import IK
 
+# ROS modules
+import rospy
 import tf
 
-# Broadcasts a T0e as the transform from given frame to world frame
 tf_broad  = tf.TransformBroadcaster()
-def show_pose(T0e,frame):
+# Broadcasts a frame using the transform from given frame to world frame
+def show_pose(H, child_frame, parent_frame="world"):
     tf_broad.sendTransform(
-        tf.transformations.translation_from_matrix(T0e),
-        tf.transformations.quaternion_from_matrix(T0e),
+        tf.transformations.translation_from_matrix(H),
+        tf.transformations.quaternion_from_matrix(H),
         rospy.Time.now(),
-        frame,
-        "world"
+        child_frame,
+        parent_frame
     )
 
 def change_axis(T):
@@ -58,30 +60,29 @@ def change_axis(T):
     #     else:
     #         switch_axis = -switch_axis
 
-    target_orienntation = T
+    H_target = T
     
     if (vertical_axis_idx == 0):
         # target_orienntation[:3,1] = switch_axis
         # target_orienntation[:3,2] = vertical_axis
-        target_orienntation[:3,:3] = target_orienntation[:3, :3] @ np.array([[0,0,1], [0,1,0], [-1,0,0]])
+        H_target[:3,:3] = H_target[:3, :3] @ np.array([[0,0,1], [0,1,0], [-1,0,0]])
     elif (vertical_axis_idx == 1):
         # target_orienntation[:3,0] = switch_axis
         # target_orienntation[:3,2] = vertical_axis
-        target_orienntation[:3,:3] = target_orienntation[:3, :3] @ np.array([[1,0,0], [0,0,-1], [0,1,0]])
+        H_target[:3,:3] = H_target[:3, :3] @ np.array([[1,0,0], [0,0,-1], [0,1,0]])
     else:
-        target_orienntation[:3,2] = vertical_axis
+        H_target[:3,2] = vertical_axis
 
-    mag = np.dot(np.array([0,0,1]), target_orienntation[:3,2])
+    mag = np.dot(np.array([0,0,1]), H_target[:3,2])
 
     if (mag > 0):
-        target_orienntation[:3,2] = -target_orienntation[:3,2]
-        target_orienntation[:3,1] = -target_orienntation[:3,1]
+        H_target[:3,2] = -H_target[:3,2]
+        H_target[:3,1] = -H_target[:3,1]
 
-    
+    return H_target
 
-    return target_orienntation
 
-if __name__ == "__main__":
+def main():
     try:
         team = rospy.get_param("team") # 'red' or 'blue'
     except KeyError:
@@ -104,88 +105,58 @@ if __name__ == "__main__":
     input("\nWaiting for start... Press ENTER to begin!\n") # get set!
     print("Go!\n") # go!
 
-    # STUDENT CODE HERE
 
+    """
+    ###############################################
+    Panda Block Stacking Challenge Code Begins Here
+    ###############################################
+    """
     fk = FK()
-    q = np.array([ 0,    0,     0, -pi/2,     0, pi/2, pi/4 ])
+    ik = IK()
 
-    arm.safe_move_to_position(q)
+    print("Moving to static table view position")
+    q_table = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
+    arm.safe_move_to_position(q_table)
     arm.open_gripper()
 
-    # get the transform from camera to panda_end_effector
-    H_ee_camera = detector.get_H_ee_camera()
+    H_ee_camera = detector.get_H_ee_camera()    # Transformation of camera frame wrt end effector frame
+    H_world_ee = fk.forward(q_table)[1]         # Transformation of end effector frame wrt world frame
 
-    # Pose of end-effector in base frame
-    _, T0e = fk.forward(q)
+    # Get detected blocks
+    cubes_wrt_world = []
+    for (name, H_camera_cube) in detector.get_detections():
+        H_world_cube = H_world_ee @ H_ee_camera @ H_camera_cube
+        show_pose(H_world_cube, name, "world")
 
-    block0 = None
-    for (name, pose) in detector.get_detections():
-        block0 = T0e @ H_ee_camera @ pose
-        show_pose(block0, name)
-        block_changed = change_axis(block0)
-        print(name)
-        print(pose)
-        
+        block_changed = change_axis(H_world_cube)
         show_pose(block_changed, name + "_changed")
-        
 
-    
-    print("T0e", T0e)
-
-    # print("target_orienntation", target_orienntation)
-    # print("det", np.linalg.det(target_orienntation[:3,:3]))
-
-    
+        cubes_wrt_world.append((name, block_changed))
 
 
+    # Move to the first block
+    H_target = cubes_wrt_world[0][1]    # Transform of first block (with modified orientation) wrt world frame
+
+    q_solution, _, success, message = ik.inverse(H_target, q_table, "J_pseudo", 0.5)
+    H_solution = fk.forward(q_solution)[1]
+
+    show_pose(H_target, "target", "world")
+    show_pose(H_solution, "solution", "world")
+
+    if success:
+        print("Attempting to grasp {block}".format(block=cubes_wrt_world[0][0]))
+        arm.safe_move_to_position(q_solution)
+        arm.close_gripper()
+        arm.safe_move_to_position(q_table)
+    else:
+        print("Failed to move to block")
+        print("Target pose:\n", H_target)
+        print("Solution:\n", H_solution)
+        print(message)
 
 
-    # new_pose = deepcopy(T0e)
-    # new_pose[:3,3] = T_block[:3,3]
-    # new_pose[2,3] += 0.2
 
-    # new_pose = np.eye(4)
-    # new_pose[:3,3] = T_block[:3,3]
-    # new_pose[2,3] += 0.2
-    # new_pose[:3, 0] = T_block[:3, 0]
-    # new_pose[:3, 1] = -T_block[:3, 2]
-    # new_pose[:3, 2] = T_block[:3, 1]
+if __name__ == "__main__":
+    main()
 
-    # T_0 = np.array([[0, 1, 0, 0],
-    #                 [-1, 0, 0, 0],
-    #                 [0, 0, 1, 0],
-    #                 [0, 0, 0, 1]])
-    
-    # T_1 = np.array([[1, 0, 0, 0],
-    #                 [0, 0, -1, 0],
-    #                 [0, 1, 0, 0],
-    #                 [0, 0, 0, 1]])
 
-    # new_pose = T_block @ T_0 @ T_1 
-
-    # show_pose(new_pose, "New Pose")
-
-    # ik = IK()
-    # q_f, _, _, _ = ik.inverse(new_pose, q, method='J_pseudo', alpha=.3)
-    # arm.safe_move_to_position(q_f)
-
-    # _, T0e = fk.forward(q_f)
-
-    # H_ee_camera = detector.get_H_ee_camera()
-
-    # blocks = []
-    # for (name, pose) in detector.get_detections():
-    #      print(name,'\n',pose)
-    #      blocks.append(pose)
-
-    # T_block_new = np.dot(T0e, np.dot(H_ee_camera, blocks[0]))
-
-    # q_f, _, _, _ = ik.inverse(T_block_new, q_f, method='J_pseudo', alpha = .3)
-
-    # arm.safe_move_to_position(q_f)
-
-    # arm.close_gripper()
-
-    # arm.safe_move_to_position(q)
-    # q =
-    # END STUDENT CODE
