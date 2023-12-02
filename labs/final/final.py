@@ -30,57 +30,126 @@ def show_pose(H, child_frame, parent_frame="world"):
         parent_frame
     )
 
-def change_axis(T):
-    # Identify the veritcal axis of the block
-    largest_mag = 0
-    vertical_axis = None
-    vertical_axis_idx = None
-    pointing_up = None
-    switch_axis = T[:3,1]
-    for i in range(3):
-        mag = np.dot(np.array([0,0,1]), T[:3,i])
-        if np.abs(mag) > largest_mag:
-            largest_mag =np.abs(mag)
-            vertical_axis = T[:3,i]
-            vertical_axis_idx = i
-            if mag > 0:
-                pointing_up = True
+class BlockStacker:
+    def __init__(self, arm, detector, fk, ik):
+        self.arm = arm
+        self.detector = detector
+        self.fk = fk
+        self.ik = ik
+
+        self.q_static_table_view = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
+        self.q_stack_base = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
+
+        self.H_world_static_table_view = self.fk.forward(self.q_static_table_view)[1]
+
+        self.H_ee_camera = self.detector.get_H_ee_camera()
+        self.H_world_ee = np.eye(4)
+        self.static_blocks = []
+        self.dynamic_blocks = []
+    
+    def change_axis(self, T):
+        # Identify the veritcal axis of the block
+        largest_mag = 0
+        vertical_axis = None
+        vertical_axis_idx = None
+        pointing_up = None
+        switch_axis = T[:3,1]
+        for i in range(3):
+            mag = np.dot(np.array([0,0,1]), T[:3,i])
+            if np.abs(mag) > largest_mag:
+                largest_mag =np.abs(mag)
+                vertical_axis = T[:3,i]
+                vertical_axis_idx = i
+                if mag > 0:
+                    pointing_up = True
+                else:
+                    pointing_up = False
+        
+        print("Vertical axis: ", vertical_axis)
+        print("Veritcal axis index: ", vertical_axis_idx)
+        print("Pointing up: ", pointing_up)
+
+        
+        # if pointing_up:
+        #     vertical_axis = -vertical_axis
+        #     if (vertical_axis_idx == 2) :
+        #         T[:3, 0] = - T[:3, 0]
+        #     else:
+        #         switch_axis = -switch_axis
+
+        H_target = T
+        
+        if (vertical_axis_idx == 0):
+            # target_orienntation[:3,1] = switch_axis
+            # target_orienntation[:3,2] = vertical_axis
+            H_target[:3,:3] = H_target[:3, :3] @ np.array([[0,0,1], [0,1,0], [-1,0,0]])
+        elif (vertical_axis_idx == 1):
+            # target_orienntation[:3,0] = switch_axis
+            # target_orienntation[:3,2] = vertical_axis
+            H_target[:3,:3] = H_target[:3, :3] @ np.array([[1,0,0], [0,0,-1], [0,1,0]])
+        else:
+            H_target[:3,2] = vertical_axis
+
+        mag = np.dot(np.array([0,0,1]), H_target[:3,2])
+
+        if (mag > 0):
+            H_target[:3,2] = -H_target[:3,2]
+            H_target[:3,1] = -H_target[:3,1]
+
+        return H_target
+
+    def moveToStaticTableView(self):
+        self.arm.safe_move_to_position(self.q_static_table_view)
+        self.H_world_ee = self.fk.forward(self.q_static_table_view)[1]
+        self.arm.open_gripper()
+    
+    def detectStaticBlocks(self):
+        for (name, H_camera_block) in self.detector.get_detections():
+            H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
+            show_pose(H_world_block, name, "world")
+
+            block_changed = self.change_axis(H_world_block)
+
+            self.static_blocks.append((name, block_changed))
+
+    def stackStaticBlocks(self):
+        x = deepcopy(self.H_world_static_table_view)
+        x[:3, 3] = np.array([0.562, -0.259, 0.25])
+
+        show_pose(x, "stacking_base", "world")
+
+        self.q_stack_base, _, success, _ = self.ik.inverse(x, self.q_static_table_view, "J_pseudo", 0.5)
+        if not success:
+            print("AHHHHHHHHHHHH!!")
+            return
+
+        # Move to the first block
+        H_target = deepcopy(self.static_blocks[0][1])    # Transform of first block (with modified orientation) wrt world frame
+        H_target[2, 3] += 0.1
+
+        q_solution, _, success, message = self.ik.inverse(H_target, self.q_static_table_view, "J_pseudo", 0.5)
+        H_solution = self.fk.forward(q_solution)[1]
+        if success:
+            self.arm.safe_move_to_position(q_solution)
+
+            H_target = self.static_blocks[0][1]    # Transform of first block (with modified orientation) wrt world frame
+
+            q_solution, _, success, message = self.ik.inverse(H_target, q_solution, "J_pseudo", 0.5)
+            H_solution = self.fk.forward(q_solution)[1]
+
+            if success:
+                print("Attempting to grasp {block}".format(block=self.static_blocks[0][0]))
+                self.arm.safe_move_to_position(q_solution)
+                self.arm.close_gripper()
+                print("Closed Gripper")
+                print("YAY :)")
+                self.arm.safe_move_to_position(self.q_stack_base)
+                self.arm.open_gripper()
+                self.arm.safe_move_to_position(self.q_static_table_view)
             else:
-                pointing_up = False
-    
-    print("Vertical axis: ", vertical_axis)
-    print("Veritcal axis index: ", vertical_axis_idx)
-    print("Pointing up: ", pointing_up)
-
-    
-    # if pointing_up:
-    #     vertical_axis = -vertical_axis
-    #     if (vertical_axis_idx == 2) :
-    #         T[:3, 0] = - T[:3, 0]
-    #     else:
-    #         switch_axis = -switch_axis
-
-    H_target = T
-    
-    if (vertical_axis_idx == 0):
-        # target_orienntation[:3,1] = switch_axis
-        # target_orienntation[:3,2] = vertical_axis
-        H_target[:3,:3] = H_target[:3, :3] @ np.array([[0,0,1], [0,1,0], [-1,0,0]])
-    elif (vertical_axis_idx == 1):
-        # target_orienntation[:3,0] = switch_axis
-        # target_orienntation[:3,2] = vertical_axis
-        H_target[:3,:3] = H_target[:3, :3] @ np.array([[1,0,0], [0,0,-1], [0,1,0]])
-    else:
-        H_target[:3,2] = vertical_axis
-
-    mag = np.dot(np.array([0,0,1]), H_target[:3,2])
-
-    if (mag > 0):
-        H_target[:3,2] = -H_target[:3,2]
-        H_target[:3,1] = -H_target[:3,1]
-
-    return H_target
-
+                print("Failed to move to grasping position")
+        else:
+            print("Failed to move above block")
 
 def main():
     try:
@@ -114,45 +183,12 @@ def main():
     fk = FK()
     ik = IK()
 
-    print("Moving to static table view position")
-    q_table = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
-    arm.safe_move_to_position(q_table)
-    arm.open_gripper()
+    block_stacker = BlockStacker(arm, detector, fk, ik)
 
-    H_ee_camera = detector.get_H_ee_camera()    # Transformation of camera frame wrt end effector frame
-    H_world_ee = fk.forward(q_table)[1]         # Transformation of end effector frame wrt world frame
+    block_stacker.moveToStaticTableView()
+    block_stacker.detectStaticBlocks()
+    block_stacker.stackStaticBlocks()
 
-    # Get detected blocks
-    cubes_wrt_world = []
-    for (name, H_camera_cube) in detector.get_detections():
-        H_world_cube = H_world_ee @ H_ee_camera @ H_camera_cube
-        show_pose(H_world_cube, name, "world")
-
-        block_changed = change_axis(H_world_cube)
-        show_pose(block_changed, name + "_changed")
-
-        cubes_wrt_world.append((name, block_changed))
-
-
-    # Move to the first block
-    H_target = cubes_wrt_world[0][1]    # Transform of first block (with modified orientation) wrt world frame
-
-    q_solution, _, success, message = ik.inverse(H_target, q_table, "J_pseudo", 0.5)
-    H_solution = fk.forward(q_solution)[1]
-
-    show_pose(H_target, "target", "world")
-    show_pose(H_solution, "solution", "world")
-
-    if success:
-        print("Attempting to grasp {block}".format(block=cubes_wrt_world[0][0]))
-        arm.safe_move_to_position(q_solution)
-        arm.close_gripper()
-        arm.safe_move_to_position(q_table)
-    else:
-        print("Failed to move to block")
-        print("Target pose:\n", H_target)
-        print("Solution:\n", H_solution)
-        print(message)
 
 
 
