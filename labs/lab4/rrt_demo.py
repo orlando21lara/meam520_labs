@@ -1,4 +1,4 @@
-import sys
+import sys, os
 import rospy
 import numpy as np
 from math import pi
@@ -22,9 +22,9 @@ mapNames = ["map1",
             "emptyMap"]
 if __name__ == "__main__":
 
-    if len(sys.argv) < 2:
-        print("usage:\n\tpython rrt_demo.py 1\n\tpython rrt_demo.py 2\n\tpython rrt_demo.py 3 ...")
-        exit()
+    # if len(sys.argv) < 2:
+    #     print("usage:\n\tpython rrt_demo.py 1\n\tpython rrt_demo.py 2\n\tpython rrt_demo.py 3 ...")
+    #     exit()
 
     rospy.init_node('RRT')
 
@@ -33,7 +33,11 @@ if __name__ == "__main__":
     print("Running test "+sys.argv[1])
     print("Moving to Start Position")
     arm.safe_move_to_position(starts[index])
-    map_struct = loadmap("../../maps/"+mapNames[index] + ".txt")
+
+    dir_path = os.path.dirname(os.path.realpath(__file__))
+
+    # map_struct = loadmap(dir_path + "/../../maps/"+mapNames[index] + ".txt")
+    map_struct = loadmap(dir_path + "/../../maps/emptyMap.txt")
     print("Map = "+ mapNames[index])
 
     print("Starting to plan")
