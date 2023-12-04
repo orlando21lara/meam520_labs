@@ -1,4 +1,5 @@
 import numpy as np
+import math
 from math import pi, acos
 from scipy.linalg import null_space
 from copy import deepcopy
@@ -6,7 +7,7 @@ from lib.calcJacobian import calcJacobian
 from lib.calculateFK import FK
 from lib.detectCollision import detectCollision
 from lib.loadmap import loadmap
-
+import matplotlib.pyplot as plt
 
 class PotentialFieldPlanner:
 
@@ -17,7 +18,7 @@ class PotentialFieldPlanner:
     center = lower + (upper - lower) / 2 # compute middle of range of motion of each joint
     fk = FK()
 
-    def __init__(self, tol=1e-4, max_steps=500, min_step_size=1e-5):
+    def __init__(self, tol=1e-4, max_steps=2000, min_step_size=1e-5):
         """
         Constructs a potential field planner with solver parameters.
 
@@ -61,7 +62,17 @@ class PotentialFieldPlanner:
         ## STUDENT CODE STARTS HERE
 
         att_f = np.zeros((3, 1)) 
+        zeta = 10
 
+        if np.linalg.norm(current-target) > 1:
+        # conic well potential
+            if np.all(current - target)<1e-3:
+                att_f = 0
+            else:
+                att_f = -(current - target)/np.linalg.norm(current - target)
+        else:
+            # parabolic well potential
+            att_f = -zeta * (current - target)
         ## END STUDENT CODE
 
         return att_f
@@ -74,7 +85,7 @@ class PotentialFieldPlanner:
         obstacle and the current joint position 
 
         INPUTS:
-        obstacle - 1x6 numpy array representing the an obstacle box in the world frame
+        obstacle - 0x6 numpy array representing the an obstacle box in the world frame
         current - 3x1 numpy array representing the current joint position in the world frame
         unitvec - 3x1 numpy array representing the unit vector from the current joint position 
         to the closest point on the obstacle box 
@@ -85,11 +96,19 @@ class PotentialFieldPlanner:
         """
 
         ## STUDENT CODE STARTS HERE
-
+        obstacle = obstacle
+        current = current.reshape((3,1))
+        unitvec = unitvec.reshape((3,1))
+        
         rep_f = np.zeros((3, 1)) 
-
+        rho0 = 0.1
+        eta = 2
+        dist,unit = PotentialFieldPlanner.dist_point2box(current.reshape((1,3)), obstacle)
+        if dist < rho0:
+            rep_f = eta * (1/dist - 1/rho0) * (1/(dist*dist)) * -unitvec
+        if np.isnan(np.any(rep_f)):
+            print('error')
         ## END STUDENT CODE
-
         return rep_f
 
     @staticmethod
@@ -161,11 +180,23 @@ class PotentialFieldPlanner:
         """
 
         ## STUDENT CODE STARTS HERE
-
         joint_forces = np.zeros((3, 7)) 
-
+        a = obstacle.shape[0]
+        repulsive_force = np.zeros((3,obstacle.shape[0]))    # calculate repulsive force against several obstacles
+        repulsive_force_sum = np.zeros((3,7))
+        for i in range(7):
+            for j in range(obstacle.shape[0]):
+                dist, unitvec = PotentialFieldPlanner.dist_point2box(current[:,i].reshape((1,3)),obstacle[j,:])
+                unitvec = unitvec.reshape((3,1))
+                repulsive_force[:,j] =  PotentialFieldPlanner.repulsive_force(obstacle[j,:],current[:,i],unitvec).flatten()
+            # print('rep_F',repulsive_force)
+            repulsive_force_sum[:,i] = sum(repulsive_force[:,j]for j in range(repulsive_force.shape[1]))
+            
+            joint_forces[:,i] = PotentialFieldPlanner.attractive_force(target[:,i],current[:,i]) + repulsive_force_sum[:,i]
+            # joint_forces[:,i] = PotentialFieldPlanner.attractive_force(target[:,i],current[:,i]) 
+            
         ## END STUDENT CODE
-
+        # print('attr_F',joint_forces)
         return joint_forces
     
     @staticmethod
@@ -186,9 +217,31 @@ class PotentialFieldPlanner:
         ## STUDENT CODE STARTS HERE
 
         joint_torques = np.zeros((1, 7)) 
+        q0 = np.hstack((np.array(q[:1]).reshape((1,1)), np.zeros((1,6)))).flatten()
+        q1 = np.hstack((np.array(q[:2]).reshape((1,2)), np.zeros((1,5)))).flatten()
+        q2 = np.hstack((np.array(q[:3]).reshape((1,3)), np.zeros((1,4)))).flatten()
+        q3 = np.hstack((np.array(q[:4]).reshape((1,4)), np.zeros((1,3)))).flatten()
+        q4 = np.hstack((np.array(q[:5]).reshape((1,5)), np.zeros((1,2)))).flatten()
+        q5 = np.hstack((np.array(q[:6]).reshape((1,6)), np.zeros((1,1)))).flatten()
+        q6 = np.array(q[:7]).reshape((1,7)).flatten()
 
-        ## END STUDENT CODE
+        Jv1 = calcJacobian(q0)[:3,:]
+        Jv2 = calcJacobian(q1)[:3,:]
+        Jv3 = calcJacobian(q2)[:3,:]
+        Jv4 = calcJacobian(q3)[:3,:]
+        Jv5 = calcJacobian(q4)[:3,:]
+        Jv6 = calcJacobian(q5)[:3,:]
+        Jv7 = calcJacobian(q6)[:3,:]
 
+        joint_torque_1 = np.transpose(Jv1) @ joint_forces[:,0]
+        joint_torque_2 = np.transpose(Jv2) @ joint_forces[:,1]
+        joint_torque_3 = np.transpose(Jv3) @ joint_forces[:,2]
+        joint_torque_4 = np.transpose(Jv4) @ joint_forces[:,3]
+        joint_torque_5 = np.transpose(Jv5) @ joint_forces[:,4]
+        joint_torque_6 = np.transpose(Jv6) @ joint_forces[:,5]
+        joint_torque_7 = np.transpose(Jv7) @ joint_forces[:,6]
+        joint_torques = joint_torque_1+joint_torque_2+joint_torque_3+joint_torque_4+joint_torque_5+joint_torque_6+joint_torque_7
+        ## END STUDENT CODES
         return joint_torques
 
     @staticmethod
@@ -212,13 +265,13 @@ class PotentialFieldPlanner:
         ## STUDENT CODE STARTS HERE
 
         distance = 0
-
+        distance = np.linalg.norm(target - current)
         ## END STUDENT CODE
 
         return distance
     
     @staticmethod
-    def compute_gradient(q, target, map_struct):
+    def compute_gradient(q, goal, map_struct):
         """
         Computes the joint gradient step to move the current joint positions to the
         next set of joint positions which leads to a closer configuration to the goal 
@@ -226,7 +279,7 @@ class PotentialFieldPlanner:
 
         INPUTS:
         q - 1x7 numpy array. the current joint configuration, a "best guess" so far for the final answer
-        target - 1x7 numpy array containing the desired joint angles
+        goal - 1x7 numpy array containing the desired joint angles configuration
         map_struct - a map struct containing the obstacle box min and max positions
 
         OUTPUTS:
@@ -236,9 +289,19 @@ class PotentialFieldPlanner:
         ## STUDENT CODE STARTS HERE
 
         dq = np.zeros((1, 7))
-
+        jointPositions_c, T0e_c = PotentialFieldPlanner.fk.forward(q)
+        jointPositions_t, T0e_t = PotentialFieldPlanner.fk.forward(goal)
+        current = np.transpose(jointPositions_c[:7,:])    # 3x7 np array
+        target = np.transpose(jointPositions_t[:7,:])   # 3x7 np array
+        
+        obstacle = np.array(map_struct.obstacles)
+        joint_forces = PotentialFieldPlanner.compute_forces(target,obstacle,current)
+        torque = PotentialFieldPlanner.compute_torques(joint_forces,q)
+        # dq = torque/np.linalg.norm(torque)
+        dq = torque
         ## END STUDENT CODE
-
+        if np.isnan(np.any(dq)):
+            print('dq error')
         return dq
 
     ###############################
@@ -262,7 +325,13 @@ class PotentialFieldPlanner:
         """
 
         q_path = np.array([]).reshape(0,7)
-
+        q = np.array([]).reshape(0,7)
+        start = np.array(start).reshape(1,7)      
+        # alpha = 0.001+0.11*math.exp(-len(q_path)/100)
+        alpha = 0.037
+        q_path = np.concatenate((q_path,start), axis=0)
+        q = np.concatenate((q,start), axis=0)
+        count=0
         while True:
 
             ## STUDENT CODE STARTS HERE
@@ -272,20 +341,37 @@ class PotentialFieldPlanner:
             
             # Compute gradient 
             # TODO: this is how to change your joint angles 
+            # print('planner',q_path[-1,:])
+            dq = PotentialFieldPlanner.compute_gradient(q_path[-1,:],goal,map_struct)
+            
+            q_new = q_path[-1,:]+alpha*dq/np.linalg.norm(dq)
+            q_path = np.concatenate((q_path,q_new.reshape((1,7))), axis=0)
+
 
             # Termination Conditions
-            if True: # TODO: check termination conditions
+            print(len(q_path))
+            step_size = np.linalg.norm(dq)
+            # print('step',step_size)
+            dist2target = PotentialFieldPlanner.q_distance(goal,q_path[-1,:])
+            if len(q_path)>=self.max_steps or dist2target < self.tol or step_size < self.min_step_size: # TODO: check termination conditions
                 break # exit the while loop if conditions are met!
-
+            # if np.any(q_path[-1,:]<PotentialFieldPlanner.lower) or np.any(q_path[-1,:]>PotentialFieldPlanner.upper):
+            #     q_path = np.delete(q_path,-1,axis=0)
             # YOU NEED TO CHECK FOR COLLISIONS WITH OBSTACLES
             # TODO: Figure out how to use the provided function 
 
             # YOU MAY NEED TO DEAL WITH LOCAL MINIMA HERE
             # TODO: when detect a local minima, implement a random walk
-            
+            if len(q_path)>3 and step_size < self.min_step_size:
+                dq = 2*(np.random.rand(1,7)-np.ones((1,7)))
+                dq = dq/np.linalg.norm(dq)
+                q_new = q_path[-1,:]+alpha * dq
+                q_path = np.concatenate((q_path,q_new), axis=0)
+                count = count+1
             ## END STUDENT CODE
-
-        return q_path
+        print('count=',count)
+        q_path = np.concatenate((q_path,start), axis=0)
+        return q
 
 ################################
 ## Simple Testing Environment ##
@@ -298,9 +384,11 @@ if __name__ == "__main__":
     planner = PotentialFieldPlanner()
     
     # inputs 
-    map_struct = loadmap("../maps/map1.txt")
+    map_struct = loadmap("../maps/map2.txt")
     start = np.array([0,-1,0,-2,0,1.57,0])
-    goal =  np.array([-1.2, 1.57 , 1.57, -2.07, -1.57, 1.57, 0.7])
+    # start = np.array([-1.2, 1.57 , 1.57, -2.07, -1.57, 1.57, 0.0])
+    goal =  np.array([-1.2, 1.57 , 1.57, -1.8, -1.57, 1.57, 0.0])
+    # goal = np.array([0.2,0.3,1,1,-1,1,0.0])
     
     # potential field planning
     q_path = planner.plan(deepcopy(map_struct), deepcopy(start), deepcopy(goal))
@@ -311,3 +399,5 @@ if __name__ == "__main__":
         print('iteration:',i,' q =', q_path[i, :], ' error={error}'.format(error=error))
 
     print("q path: ", q_path)
+    plt.plot(q_path)
+    plt.show()
