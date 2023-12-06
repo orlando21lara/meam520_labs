@@ -31,6 +31,7 @@ mapNames = ["map1",
             "map4",
             "emptyMap"]
 if __name__ == "__main__":
+    np.set_printoptions(precision=4, suppress=True)
 
     if len(sys.argv) < 2:
         print("usage:\n\tpython rrt_demo.py 1\n\tpython rrt_demo.py 2\n\tpython rrt_demo.py 3 ...")
@@ -55,7 +56,7 @@ if __name__ == "__main__":
     path = rrt(deepcopy(map_struct), deepcopy(starts[index]), deepcopy(goals[index]))
     stop = perf_counter()
     dt = stop - start
-    print("RRT took {time:2.2f} sec. Path is.".format(time=dt))
+    print("RRT took {time:2.4f} sec.\nPath is:".format(time=dt))
     print(np.round(path,4))
     input("Press Enter to Send Path to Arm")
 
