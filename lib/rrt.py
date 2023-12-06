@@ -47,10 +47,9 @@ class RRTConnect:
 
         self.reached = False
         self.max_iter = 10000
-        # self.step_size = 0.1              # meters
         self.step_size = 2.0                # rad
         self.arm_sphere_radius = 0.05       # meters
-        self.obs_sphere_radius = 0.20        # meters
+        self.obs_sphere_radius = 0.15        # meters
     
     def createNode(self, position=None, q=None, parent=None):
         if q is not None:
@@ -199,7 +198,7 @@ class RRTConnect:
                 return True
         
         # Check if the arm is in collision with the floor
-        for i in range(1, node.joint_positions.shape[0]-1):
+        for i in range(1, node.joint_positions.shape[0]):
             if detectCollision.sphereBoxCollision(node.joint_positions[i], self.obs_sphere_radius , np.array([-1.0, -1.0, -1.0, 1.0, 1.0, 0.00])):
                 return True
 
@@ -247,7 +246,6 @@ def rrt(map, start, goal):
 
 if __name__ == '__main__':
     # set a constant seed for reproducibility
-    np.random.seed(42)
     dir_path = os.path.dirname(os.path.realpath(__file__))
     print("Directory of this file: ", dir_path)
 
