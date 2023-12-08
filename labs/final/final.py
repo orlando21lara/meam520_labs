@@ -31,11 +31,11 @@ def show_pose(H, child_frame, parent_frame="world"):
     )
 
 class BlockStacker:
-    def __init__(self, arm, detector, fk, ik):
+    def __init__(self, arm, detector):
         self.arm = arm
         self.detector = detector
-        self.fk = fk
-        self.ik = ik
+        self.fk = FK()
+        self.ik = IK()
 
         self.q_static_table_view = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
         self.H_world_static_table_view = self.fk.forward(self.q_static_table_view)[1]
@@ -54,51 +54,37 @@ class BlockStacker:
         self.static_blocks = []
         self.dynamic_blocks = []
     
-    def change_axis(self, T):
-        # Identify the veritcal axis of the block
+    def changeAxis(self, T):
         largest_mag = 0
         vertical_axis = None
         vertical_axis_idx = None
-        pointing_up = None
-        switch_axis = T[:3,1]
+
+        # Identify the veritcal axis of the block
         for i in range(3):
             mag = np.dot(np.array([0,0,1]), T[:3,i])
             if np.abs(mag) > largest_mag:
-                largest_mag =np.abs(mag)
-                vertical_axis = T[:3,i]
+                largest_mag = np.abs(mag)
+                vertical_axis = deepcopy(T[:3,i])
                 vertical_axis_idx = i
-                if mag > 0:
-                    pointing_up = True
-                else:
-                    pointing_up = False
         
-        print("Vertical axis: ", vertical_axis)
-        print("Veritcal axis index: ", vertical_axis_idx)
-        print("Pointing up: ", pointing_up)
-
-        
-        # if pointing_up:
-        #     vertical_axis = -vertical_axis
-        #     if (vertical_axis_idx == 2) :
-        #         T[:3, 0] = - T[:3, 0]
-        #     else:
-        #         switch_axis = -switch_axis
-
-        H_target = T
-        
+        # Create a new target pose such that the vertical axis is the z-axis
+        H_target = deepcopy(T)
         if (vertical_axis_idx == 0):
-            # target_orienntation[:3,1] = switch_axis
-            # target_orienntation[:3,2] = vertical_axis
-            H_target[:3,:3] = H_target[:3, :3] @ np.array([[0,0,1], [0,1,0], [-1,0,0]])
+            # If x-axis is vertical, rotate about y-axis by 90 degrees
+            H_target[:3,:3] = H_target[:3, :3] @ np.array([[0,  0, 1],
+                                                           [0,  1, 0],
+                                                           [-1, 0, 0]])
         elif (vertical_axis_idx == 1):
-            # target_orienntation[:3,0] = switch_axis
-            # target_orienntation[:3,2] = vertical_axis
-            H_target[:3,:3] = H_target[:3, :3] @ np.array([[1,0,0], [0,0,-1], [0,1,0]])
+            # If y-axis is vertical, rotate about x-axis by 90 degrees
+            H_target[:3,:3] = H_target[:3, :3] @ np.array([[1,  0,  0],
+                                                           [0,  0, -1],
+                                                           [0,  1,  0]])
         else:
             H_target[:3,2] = vertical_axis
 
+        # If the z-axis of the block is pointing up, flip it
+        # Also flip another axis to make sure the block is still a right-handed coordinate system
         mag = np.dot(np.array([0,0,1]), H_target[:3,2])
-
         if (mag > 0):
             H_target[:3,2] = -H_target[:3,2]
             H_target[:3,1] = -H_target[:3,1]
@@ -113,10 +99,7 @@ class BlockStacker:
     def detectStaticBlocks(self):
         for (name, H_camera_block) in self.detector.get_detections():
             H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
-            show_pose(H_world_block, name, "world")
-
-            block_changed = self.change_axis(H_world_block)
-
+            block_changed = self.changeAxis(H_world_block)
             self.static_blocks.append((name, block_changed))
         
         self.static_blocks.sort(key=lambda x: x[1][1, 3], reverse=False)
@@ -197,13 +180,9 @@ def main():
     Panda Block Stacking Challenge Code Begins Here
     ###############################################
     """
-    fk = FK()
-    ik = IK()
-
-    block_stacker = BlockStacker(arm, detector, fk, ik)
+    block_stacker = BlockStacker(arm, detector)
 
     block_stacker.moveToStaticTableView()
-    block_stacker.detectStaticBlocks()
     block_stacker.stackStaticBlocks()
 
 
