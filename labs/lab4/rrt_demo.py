@@ -56,10 +56,18 @@ if __name__ == "__main__":
     path = rrt(deepcopy(map_struct), deepcopy(starts[index]), deepcopy(goals[index]))
     stop = perf_counter()
     dt = stop - start
-    print("RRT took {time:2.4f} sec.\nPath is:".format(time=dt))
-    print(np.round(path,4))
-    input("Press Enter to Send Path to Arm")
+    print("Path:")
+    for p in path:
+        print(p)
+    print("RRT took {time:2.4f} seconds".format(time=dt))
+    print("Path length = "+str(len(path)))
 
+    input("Press ENTER to executing trajectory")
+    start = perf_counter()
     for joint_set in path:
         arm.safe_move_to_position(joint_set)
+    stop = perf_counter()
+    dt = stop - start
+    print("Trajectory took {time:2.4f} sec.".format(time=dt))
+    print("Reached Goal: ", np.linalg.norm(arm.get_positions() - goals[index]) < 0.01)
     print("Trajectory Complete!")
