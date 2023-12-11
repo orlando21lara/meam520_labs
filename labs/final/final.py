@@ -122,8 +122,8 @@ class VelocityController():
         self.start_time = None
         self.last_iteration_time = None
 
-        self.a_max = 1.0    # m/s^2
-        self.v_max = 2.0    # m/s
+        self.a_max = 1.5    # m/s^2
+        self.v_max = 3.0    # m/s
 
         self.kp = 5.0       # Proportional gain for position
         self.kr = 5.0       # Proportional gain for rotation
@@ -259,6 +259,12 @@ class BlockStacker:
         self.static_blocks = []
         self.dynamic_blocks = []
     
+    def openGripper(self):
+        self.arm.exec_gripper_cmd(0.08)
+    
+    def closeGripper(self):
+        self.arm.exec_gripper_cmd(0.045)
+
     def stateCallback(self, state):
         if self.vel_controller is not None:
             self.vel_controller.followTrajectory(state, self.arm)
@@ -300,17 +306,21 @@ class BlockStacker:
 
         return H_target
 
-    def moveToPosition(self, goal_pose):
-        start_pose = self.fk.forward(self.arm.get_positions())[1]
-        self.vel_controller = VelocityController(self.fk, start_pose, goal_pose)
-        rate = rospy.Rate(200)
-        while(self.vel_controller.active):
-            rate.sleep()
-            self.vel_controller.followTrajectory(self.arm.get_state(), self.arm)
-        
-        self.plotTrajectory(self.vel_controller)
-        # Reset the velocity controller so that stateCallback does not try to follow the trajectory
-        self.vel_controller = None
+    def moveToPosition(self, H_goal=None, q_goal=None):
+        if q_goal is not None:
+            self.arm.safe_move_to_position(q_goal)
+            return
+        elif H_goal is not None:
+            start_pose = self.fk.forward(self.arm.get_positions())[1]
+            self.vel_controller = VelocityController(self.fk, start_pose, H_goal)
+            rate = rospy.Rate(200)
+            while(self.vel_controller.active):
+                rate.sleep()
+                self.vel_controller.followTrajectory(self.arm.get_state(), self.arm)
+            
+            # self.plotTrajectory(self.vel_controller)
+            # Reset the velocity controller so that stateCallback does not try to follow the trajectory
+            self.vel_controller = None
         
     def plotTrajectory(self, vel_controller):
         import matplotlib.pyplot as plt
@@ -389,6 +399,7 @@ class BlockStacker:
 
     def stackStaticBlocks(self):
         H_current_stack = deepcopy(self.H_world_stack_base)
+        self.openGripper()
         
         for (name, H_block) in self.static_blocks:
             # Move above the block
@@ -399,7 +410,7 @@ class BlockStacker:
             if success:
                 print("Attempting to move above block", name)
                 # Attempting to move above the block
-                self.arm.safe_move_to_position(q_solution)
+                self.moveToPosition(q_goal=q_solution)
 
                 H_target = H_block      # New target is the pose of the block
 
@@ -408,23 +419,23 @@ class BlockStacker:
 
                 if success:
                     # Attempting to move to grasping position
-                    self.arm.safe_move_to_position(q_solution)
-                    self.arm.close_gripper()
+                    self.moveToPosition(q_goal=q_solution)
+                    self.closeGripper()
 
                     """ Now that the block is grasped we will move on to stacking it"""
                     # Move to position above the stack
                     H_current_stack[2, 3] += 0.05
                     q_stack_above, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
-                    self.arm.safe_move_to_position(q_stack_above)
+                    self.moveToPosition(q_goal=q_stack_above)
 
                     # Move down to drop the block
                     H_current_stack[2, 3] -= 0.04
                     q_stack, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
-                    self.arm.safe_move_to_position(q_stack)
-                    self.arm.open_gripper()
+                    self.moveToPosition(q_goal=q_stack)
+                    self.openGripper()
 
                     # Move back above the stack
-                    self.arm.safe_move_to_position(q_stack_above)
+                    self.moveToPosition(q_goal=q_stack_above)
                     
                     # Update the stack position
                     H_current_stack[2, 3] += 0.04
@@ -466,13 +477,16 @@ def main():
     """
 
     block_stacker.moveToStaticTableView()
+    block_stacker.detectStaticBlocks()
+    block_stacker.stackStaticBlocks()
+
 
     # Print current position
-    H_curr = block_stacker.fk.forward(block_stacker.arm.get_positions())[1]
+    # H_curr = block_stacker.fk.forward(block_stacker.arm.get_positions())[1]
 
-    H_target = deepcopy(H_curr)
-    H_target[2, 3] -= 0.2
-    H_target[0, 3] += 0.1
+    # H_target = deepcopy(H_curr)
+    # H_target[2, 3] -= 0.2
+    # H_target[0, 3] += 0.1
 
     # dq = np.array([0.05, 0, 0, 0, 0, 0, 0])
     # curr_time = time_in_seconds()
@@ -485,13 +499,13 @@ def main():
     #     block_stacker.arm.safe_set_joint_positions_velocities(new_q, dq)
 
 
-    print("Moving to position. time: ", time_in_seconds())
-    block_stacker.moveToPosition(H_target)
-    print("Done moving. time: ", time_in_seconds())
-    new_H_curr = block_stacker.fk.forward(block_stacker.arm.get_positions())[1]
-    print("Start pose:", H_curr)
-    print("Target pose:", H_target)
-    print("Solution pose:", new_H_curr)
+    # print("Moving to position. time: ", time_in_seconds())
+    # block_stacker.moveToPosition(H_target)
+    # print("Done moving. time: ", time_in_seconds())
+    # new_H_curr = block_stacker.fk.forward(block_stacker.arm.get_positions())[1]
+    # print("Start pose:", H_curr)
+    # print("Target pose:", H_target)
+    # print("Solution pose:", new_H_curr)
     # block_stacker.stackStaticBlocks()
 
 
