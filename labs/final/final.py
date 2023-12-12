@@ -1,5 +1,4 @@
 # Python modules
-import sys
 import numpy as np
 from copy import deepcopy
 from math import pi
@@ -32,203 +31,6 @@ def show_pose(H, child_frame, parent_frame="world"):
         parent_frame
     )
 
-def rotvec_to_matrix(rotvec):
-    theta = np.linalg.norm(rotvec)
-    if theta < 1e-9:
-        return np.eye(3)
-
-    # Normalize to get rotation axis.
-    k = rotvec / theta
-    K = np.array([
-        [0, -k[2], k[1]],
-        [k[2], 0, -k[0]],
-        [-k[1], k[0], 0]
-    ])
-    R = np.eye(3) + np.sin(theta) * K + (1 - np.cos(theta)) * np.dot(K, K)
-    return R
-
-class TrapezoidalVelocityProfile():
-    def __init__(self, start_position, goal_position, v_max, a_max):
-        self.v_max = v_max
-        self.a_max = a_max
-        self.start_position = start_position
-        self.goal_position = goal_position
-        self.distance = np.linalg.norm(goal_position - start_position)
-        self.direction = (goal_position - start_position) / self.distance
-
-        self.t1 = self.v_max / self.a_max       # Time to reach max velocity
-        self.t2 = self.distance / self.v_max    # Time to stop traveling at max velocity and start decelerating
-
-        self.t_total = self.t1 + self.t2
-    
-    def getTrajectory(self, t):
-        if t < self.t1:
-            # Accelerating
-            des_pos = self.start_position + 0.5 * self.a_max * t**2 * self.direction    # self.a_max = self.v_max / self.t1
-            des_vel = self.a_max * t * self.direction
-            return des_pos, des_vel
-        elif t < self.t2:
-            # Traveling at max velocity
-            des_pos = self.start_position + self.v_max * (t - 0.5 * self.t1) * self.direction
-            des_vel = self.v_max * self.direction
-            return des_pos, des_vel
-        elif t < self.t_total:
-            # Decelerating
-            des_pos = self.start_position + self.direction * (-self.v_max * 0.5 / (self.t_total - self.t2) * (self.t2**2 + t**2) \
-                                                              + self.v_max / (self.t_total - self.t2) * self.t_total * t \
-                                                              - self.v_max * 0.5 * self.t1)
-            des_vel = self.direction * (self.v_max / (self.t_total - self.t2) * (self.t_total - t))
-            return des_pos, des_vel
-        else:
-            # Done
-            return self.goal_position, np.zeros(3)
-
-class TriangularVelocityProfile():
-    def __init__(self, start_position, goal_position, v_max, a_max):
-        self.v_max = v_max
-        self.a_max = a_max
-        self.start_position = start_position
-        self.goal_position = goal_position
-        self.distance = np.linalg.norm(goal_position - start_position)
-        self.direction = (goal_position - start_position) / self.distance
-
-        self.tp = np.sqrt(self.distance / self.a_max)   # Time to reach peak velocity
-        self.t_total = 2 * self.tp
-    
-    def getTrajectory(self, t):
-        v_top = self.a_max * self.tp
-
-        if t < self.tp:
-            # Accelerating
-            des_pos = self.start_position + 0.5 * self.a_max * t**2 * self.direction    # self.a_max = self.v_top / self.tp
-            des_vel = self.a_max * t * self.direction
-            return des_pos, des_vel
-        elif t < self.t_total:
-            # Decelerating
-            des_pos = self.start_position + self.direction * (v_top * 0.5 / (self.t_total - self.tp) * (self.tp**2 - t**2) \
-                                                              + v_top / (self.t_total - self.tp) * self.t_total * (t - self.tp) \
-                                                              + v_top * 0.5 * self.tp)
-            des_vel = self.direction * (v_top / (self.t_total - self.tp) * (self.t_total - t))
-            return des_pos, des_vel
-        else:
-            # Done
-            return self.goal_position, np.zeros(3)
-
-class VelocityController():
-    def __init__(self, fk, start_pose, goal_pose):
-        self.active = False
-
-        self.fk = fk
-        self.start_time = None
-        self.last_iteration_time = None
-
-        self.a_max = 1.5    # m/s^2
-        self.v_max = 3.0    # m/s
-
-        self.kp = 5.0       # Proportional gain for position
-        self.kr = 5.0       # Proportional gain for rotation
-        self.k0 = 1.0       # Proportional gain for secondary task
-
-        self.loop_period = 0.005    # 200 Hz
-
-        # Determine which velocity profile to use
-        self.start_pose = start_pose
-        self.goal_pose = goal_pose
-        start_position = start_pose[:3,3]
-        goal_position = goal_pose[:3,3]
-        self.distance = np.linalg.norm(goal_position - start_position)
-        if self.distance < self.v_max**2 / self.a_max:
-            self.trajectory = TriangularVelocityProfile(start_position, goal_position, self.v_max, self.a_max)
-        else:
-            self.trajectory = TrapezoidalVelocityProfile(start_position, goal_position, self.v_max, self.a_max)
-        
-        self.active = True
-        self.queue_size = 1
-        self.dq_queue = [np.zeros(7) for _ in range(self.queue_size)]
-
-        self.time_stamps = []
-        self.des_pos_over_time = []
-        self.des_vel_over_time = []
-        self.real_pos_over_time = []
-        self.commanded_vel_over_time = []
-        self.dq_over_time = []
-        self.filtered_dq_over_time = []
-        self.curr_dq = []
-
-    def getSecondaryTask(self, q):
-        # This is an elbow up preference task
-        lower = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973])
-        upper = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973])
-
-        q_e = lower + (upper - lower) / 2
-
-        return -self.k0 * (q - q_e)
-
-    def followTrajectory(self, state, arm):
-        if self.active:
-            try:
-                if self.last_iteration_time is None:
-                    # self.start_time = time_in_seconds()
-                    # self.last_iteration_time = time_in_seconds()
-                    self.last_iteration_time = 0.0
-                
-                # curr_time = time_in_seconds()
-                # t = curr_time - self.start_time
-
-                t = self.last_iteration_time
-                dt = self.loop_period
-                self.last_iteration_time = self.last_iteration_time + dt
-
-                # Get desired trajectory
-                x_des, v_des = self.trajectory.getTrajectory(t)
-
-                # Get current end effector position
-                q = state['position']
-
-                _, T0e = self.fk.forward(q)
-
-                R_curr = (T0e[:3,:3])
-                x_curr = (T0e[0:3,3])
-
-                R_des = self.goal_pose[:3,:3]
-                w_des = 0.0 * np.array([1.0, 0.0, 0.0])
-
-                if np.linalg.norm(x_curr - self.goal_pose[:3,3]) < 0.001 and np.linalg.norm(v_des) < 0.01:
-                    # Done
-                    self.active = False
-                    return
-
-                # Compute target velocities
-                v_tar = v_des + self.kp * (x_des - x_curr)
-                w_tar = w_des + self.kr * calcAngDiff(R_des, R_curr).flatten()
-
-                b = self.getSecondaryTask(q)
-
-                # Velocity Inverse Kinematics
-                dq = IK_velocity_null(q, v_tar, w_tar, b).flatten()
-                
-                # Do some filtering
-                self.dq_queue.append(dq)
-                self.dq_queue.pop(0)
-                dq_filt = np.mean(self.dq_queue, axis=0)
-
-                new_q = q + dt * dq_filt
-
-                # Store trajectory data
-                self.time_stamps.append(t)
-                self.real_pos_over_time.append(x_curr)
-                self.des_pos_over_time.append(x_des)
-                self.des_vel_over_time.append(v_des)
-                self.commanded_vel_over_time.append(v_tar)
-                self.dq_over_time.append(dq)
-                self.filtered_dq_over_time.append(dq_filt)
-                self.curr_dq.append(arm.get_velocities(False))
-
-                arm.safe_set_joint_positions_velocities(new_q, dq_filt)
-
-            except rospy.exceptions.ROSException:
-                pass
-
 class BlockStacker:
     def __init__(self, team):
         self.fk = FK()
@@ -236,10 +38,7 @@ class BlockStacker:
         self.team = team
 
         self.detector = ObjectDetector()
-        self.vel_controller = None
 
-        # callback = lambda state : self.stateCallback(state)
-        # self.arm = ArmController(on_state_callback=callback)
         self.arm = ArmController()
 
         self.q_static_table_view = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
@@ -264,12 +63,8 @@ class BlockStacker:
     def openGripper(self):
         return self.arm.exec_gripper_cmd(0.08)
 
-    def closeGripper(self, force):
-        return self.arm.exec_gripper_cmd(0.03)
-
-    def stateCallback(self, state):
-        if self.vel_controller is not None:
-            self.vel_controller.followTrajectory(state, self.arm)
+    def closeGripper(self, force=None):
+        return self.arm.exec_gripper_cmd(0.03, force=force)
 
     def changeAxis(self, T):
         largest_mag = 0
@@ -307,58 +102,6 @@ class BlockStacker:
             H_target[:3,1] = -H_target[:3,1]
 
         return H_target
-
-    def moveToPosition(self, H_goal=None, q_goal=None):
-        if q_goal is not None:
-            self.arm.safe_move_to_position(q_goal)
-            return
-        elif H_goal is not None:
-            start_pose = self.fk.forward(self.arm.get_positions())[1]
-            self.vel_controller = VelocityController(self.fk, start_pose, H_goal)
-            rate = rospy.Rate(200)
-            while(self.vel_controller.active):
-                rate.sleep()
-                self.vel_controller.followTrajectory(self.arm.get_state(), self.arm)
-            
-            # self.plotTrajectory(self.vel_controller)
-            # Reset the velocity controller so that stateCallback does not try to follow the trajectory
-            self.vel_controller = None
-        
-    def plotTrajectory(self, vel_controller):
-        import matplotlib.pyplot as plt
-        fig, axs = plt.subplots(4, 1, figsize=(10, 10))
-        fig.suptitle('Trajectory Tracking')
-
-        axs[0].plot(vel_controller.time_stamps, np.asarray(vel_controller.real_pos_over_time)[:, 0], 'r-*', label='real-x')
-        axs[0].plot(vel_controller.time_stamps, np.asarray(vel_controller.real_pos_over_time)[:, 1], 'g-*', label='real-y')
-        axs[0].plot(vel_controller.time_stamps, np.asarray(vel_controller.real_pos_over_time)[:, 2], 'b-*', label='real-z')
-        axs[0].plot(vel_controller.time_stamps, np.asarray(vel_controller.des_pos_over_time)[:,0], 'r-o', label="des-x")
-        axs[0].plot(vel_controller.time_stamps, np.asarray(vel_controller.des_pos_over_time)[:,1], 'g-o', label="des-y")
-        axs[0].plot(vel_controller.time_stamps, np.asarray(vel_controller.des_pos_over_time)[:,2], 'b-o', label="des-z")
-        axs[0].set_ylabel("Position (m)")
-        axs[0].legend()
-
-        axs[1].plot(vel_controller.time_stamps, np.asarray(vel_controller.commanded_vel_over_time)[:, 0], 'r-*', label='cmd_v-x')
-        axs[1].plot(vel_controller.time_stamps, np.asarray(vel_controller.commanded_vel_over_time)[:, 1], 'g-*', label='cmd_v-y')
-        axs[1].plot(vel_controller.time_stamps, np.asarray(vel_controller.commanded_vel_over_time)[:, 2], 'b-*', label='cmd_v-z')
-        axs[1].plot(vel_controller.time_stamps, np.asarray(vel_controller.des_vel_over_time)[:, 0], 'r-o', label='des_v-x')
-        axs[1].plot(vel_controller.time_stamps, np.asarray(vel_controller.des_vel_over_time)[:, 1], 'g-o', label='des_v-y')
-        axs[1].plot(vel_controller.time_stamps, np.asarray(vel_controller.des_vel_over_time)[:, 2], 'b-o', label='des_v-z')
-        axs[1].set_ylabel("Velocity (m/s)")
-        axs[1].legend()
-
-        axs[2].plot(vel_controller.time_stamps, vel_controller.dq_over_time, '-*' )
-        axs[2].plot(vel_controller.time_stamps, vel_controller.filtered_dq_over_time, '-')
-        axs[2].set_ylabel("Joint Velocities (rad/s)")
-        axs[2].set_xlabel("Time (s)")
-
-        axs[3].plot(np.linalg.norm(np.asarray(vel_controller.filtered_dq_over_time)-np.asarray(vel_controller.curr_dq), axis=1), '-*')
-        axs[3].set_ylabel("Velcoity difference (rad/s)")
-        axs[3].set_xlabel("Time (s)")
-
-
-
-        plt.show()
 
     def moveToStaticTableView(self):
         self.arm.safe_move_to_position(self.q_static_table_view)
@@ -405,8 +148,8 @@ class BlockStacker:
 
             H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
             block_changed = self.changeAxis(H_world_block)
-            show_pose(H_world_block, name, 'world')
-            show_pose(block_changed, name+"_c", 'world')
+            # show_pose(H_world_block, name, 'world')
+            # show_pose(block_changed, name+"_c", 'world')
             self.static_blocks.append((name, block_changed))
 
         if self.team == 'red':
@@ -427,7 +170,7 @@ class BlockStacker:
             if success:
                 print("Attempting to move above block", name)
                 # Attempting to move above the block
-                self.moveToPosition(q_goal=q_solution)
+                self.arm.safe_move_to_position(q_solution)
 
                 H_target = H_block      # New target is the pose of the block
 
@@ -436,23 +179,23 @@ class BlockStacker:
 
                 if success:
                     # Attempting to move to grasping position
-                    self.moveToPosition(q_goal=q_solution)
+                    self.arm.safe_move_to_position(q_solution)
                     self.closeGripper()
 
                     """ Now that the block is grasped we will move on to stacking it"""
                     # Move to position above the stack
                     H_current_stack[2, 3] += 0.05
                     q_stack_above, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
-                    self.moveToPosition(q_goal=q_stack_above)
+                    self.arm.safe_move_to_position(q_stack_above)
 
                     # Move down to drop the block
                     H_current_stack[2, 3] -= 0.04
                     q_stack, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
-                    self.moveToPosition(q_goal=q_stack)
+                    self.arm.safe_move_to_position(q_stack)
                     self.openGripper()
 
                     # Move back above the stack
-                    self.moveToPosition(q_goal=q_stack_above)
+                    self.arm.safe_move_to_position(q_stack_above)
                     
                     # Update the stack position
                     H_current_stack[2, 3] += 0.04
