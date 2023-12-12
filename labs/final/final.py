@@ -256,14 +256,16 @@ class BlockStacker:
 
         self.H_ee_camera = self.detector.get_H_ee_camera()
         self.H_world_ee = np.eye(4)
+
+        self.num_readings = 5
         self.static_blocks = []
         self.dynamic_blocks = []
     
     def openGripper(self):
-        self.arm.exec_gripper_cmd(0.08)
-    
-    def closeGripper(self):
-        self.arm.exec_gripper_cmd(0.045)
+        return self.arm.exec_gripper_cmd(0.08)
+
+    def closeGripper(self, force):
+        return self.arm.exec_gripper_cmd(0.03)
 
     def stateCallback(self, state):
         if self.vel_controller is not None:
@@ -361,18 +363,18 @@ class BlockStacker:
     def moveToStaticTableView(self):
         self.arm.safe_move_to_position(self.q_static_table_view)
         self.H_world_ee = self.fk.forward(self.q_static_table_view)[1]
-        self.arm.open_gripper()
     
     def moveToTurnTableView(self):
         dynamic_block_height = 0
         q_turntableview = np.array([pi/2,pi/8,0,-3*pi/8,0,pi/2,pi/4])
         self.arm.safe_move_to_position(q_turntableview)
+        self.H_world_ee = self.fk.forward(q_turntableview)[1]
         # self.detector. get_detections()
         for (name, H_camera_block) in self.detector.get_detections():
             H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
-            # show_pose(H_world_block, name, "world")
+            show_pose(H_world_block, name, "world")
             dynamic_block_height += H_world_block[2,2]
-            block_changed = self.change_axis(H_world_block)
+            block_changed = self.changeAxis(H_world_block)
             self.dynamic_blocks.append((name, block_changed))
             # show_pose(block_changed, name, "dynamic")
         dynamic_block_height = dynamic_block_height/len(self.dynamic_blocks)
@@ -387,9 +389,24 @@ class BlockStacker:
         # self.arm.safe_move_to_position(q_liedown)
         
     def detectStaticBlocks(self):
-        for (name, H_camera_block) in self.detector.get_detections():
+        static_blocks_readings = {}
+        for i in range(self.num_readings):
+            for (name, H_camera_block) in self.detector.get_detections():
+                if name not in static_blocks_readings:
+                    # Create the empty list
+                    static_blocks_readings[name] = []
+                static_blocks_readings[name].append(H_camera_block)
+
+        for (name, block_list) in static_blocks_readings.items():
+            block_position = np.mean(np.asarray(block_list)[:,:3,3], axis=0)
+            H_camera_block = np.eye(4)
+            H_camera_block[:3,3] = block_position
+            H_camera_block[:3,:3] = block_list[-1][:3,:3]
+
             H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
             block_changed = self.changeAxis(H_world_block)
+            show_pose(H_world_block, name, 'world')
+            show_pose(block_changed, name+"_c", 'world')
             self.static_blocks.append((name, block_changed))
 
         if self.team == 'red':
@@ -444,6 +461,47 @@ class BlockStacker:
             else:
                 print("Failed to move above block")
 
+    def testGrasping(self):
+        for (name, H_block) in self.static_blocks:
+            # Move above the block
+            H_target = deepcopy(H_block)
+            H_target[2, 3] += 0.1
+
+            q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
+            if success:
+                print("Attempting to move above block", name)
+                # Attempting to move above the block
+                self.moveToPosition(q_goal=q_solution)
+                self.openGripper()
+
+                H_target = H_block      # New target is the pose of the block
+
+                # Solving for the grasping position
+                q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
+
+                if success:
+                    # Attempting to move to grasping position
+                    self.moveToPosition(q_goal=q_solution)
+                    while True:
+                        force = float(input("Enter force to apply: "))
+                        success = self.closeGripper(force)
+                        print("Gripper closed successfully:", success)
+
+                        input("Press enter to open gripper")
+                        success = self.openGripper()
+
+                else:
+                    print("Failed to find inverse when going down")
+            else:
+                print("Failed to find inverse going above")
+            break
+
+    def testGripper(self):
+        input('Press enter to open')
+        self.openGripper()
+        input("Prese enter to close")
+        self.closeGripper()
+
 
 def main():
     np.set_printoptions(precision=4, suppress=True)
@@ -479,34 +537,6 @@ def main():
     block_stacker.moveToStaticTableView()
     block_stacker.detectStaticBlocks()
     block_stacker.stackStaticBlocks()
-
-
-    # Print current position
-    # H_curr = block_stacker.fk.forward(block_stacker.arm.get_positions())[1]
-
-    # H_target = deepcopy(H_curr)
-    # H_target[2, 3] -= 0.2
-    # H_target[0, 3] += 0.1
-
-    # dq = np.array([0.05, 0, 0, 0, 0, 0, 0])
-    # curr_time = time_in_seconds()
-    # rate = rospy.Rate(100)
-    # while True:
-    #     print("Time: ", time_in_seconds())
-    #     rate.sleep()
-    #     dt = time_in_seconds() - curr_time
-    #     new_q = block_stacker.arm.get_positions() + dt * dq
-    #     block_stacker.arm.safe_set_joint_positions_velocities(new_q, dq)
-
-
-    # print("Moving to position. time: ", time_in_seconds())
-    # block_stacker.moveToPosition(H_target)
-    # print("Done moving. time: ", time_in_seconds())
-    # new_H_curr = block_stacker.fk.forward(block_stacker.arm.get_positions())[1]
-    # print("Start pose:", H_curr)
-    # print("Target pose:", H_target)
-    # print("Solution pose:", new_H_curr)
-    # block_stacker.stackStaticBlocks()
 
 
 if __name__ == "__main__":
