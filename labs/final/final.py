@@ -1,4 +1,5 @@
 # Python modules
+import os
 import numpy as np
 from copy import deepcopy
 from math import pi
@@ -32,17 +33,17 @@ def show_pose(H, child_frame, parent_frame="world"):
     )
 
 class Stack:
-    def __init__(self, x_pos, y_pos, team, name, use_precomputed=False):
+    def __init__(self, x_pos, y_pos, q_goal_table_seed, team, name, ik, use_precomputed=False):
         self.stack_base = np.array([[1,  0,  0, x_pos],
                                     [0, -1,  0, y_pos],
                                     [0,  0, -1, 0.225], 
                                     [0,  0,  0,     1]])
-        self.q_stack_base = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
-        #TODO: compute these
-
+        self.q_stack_base_seed = q_goal_table_seed
         self.team = team
         self.name = name
-        self.max_size = 5
+        self.ik = ik
+
+        self.max_size = 2
         self.stack_size = 0
 
         self.preplacement_q = np.zeros((self.max_size, 7))
@@ -55,10 +56,11 @@ class Stack:
         self.z_stear_clear_offset = 0.05
         self.x_steer_clear_offset = -0.05
         if team == 'red':
-            self.y_steer_clear_offset = -0.05
+            # self.y_steer_clear_offset = -0.05
+            self.y_steer_clear_offset = 0.0
         else:
-            self.y_steer_clear_offset = 0.05
-
+            # self.y_steer_clear_offset = 0.05
+            self.y_steer_clear_offset = 0.0
 
         self.computations_are_valid = True
 
@@ -73,19 +75,21 @@ class Stack:
 
     def savePositions(self):
         print("Saving positions to file")
-        np.save(self.name + "_preplacement_q.npy", self.preplacement_q)
-        np.save(self.name + "_placement_q.npy", self.placement_q)
-        np.save(self.name + "_steer_clear_q.npy", self.steer_clear_q)
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        np.save(dir_path + "/" + self.name + "_preplacement_q.npy", self.preplacement_q)
+        np.save(dir_path + "/" + self.name + "_placement_q.npy", self.placement_q)
+        np.save(dir_path + "/" + self.name + "_steer_clear_q.npy", self.steer_clear_q)
     
     def loadPositions(self):
         print("Loading positions from file")
-        self.preplacement_q = np.load(self.name + "_preplacement_q.npy")
-        self.placement_q = np.load(self.name + "_placement_q.npy")
-        self.placement_q = np.load(self.name + "_steer_clear_q.npy")
+        dir_path = os.path.dirname(os.path.realpath(__file__))
+        self.preplacement_q = np.load(dir_path + '/' + self.name + "_preplacement_q.npy")
+        self.placement_q    = np.load(dir_path + '/' + self.name + "_placement_q.npy")
+        self.steer_clear_q    = np.load(dir_path + '/' + self.name + "_steer_clear_q.npy")
 
     def computeStackPositions(self):
         H_curr = deepcopy(self.stack_base)
-        q_curr = deepcopy(self.q_stack_base)
+        q_curr = deepcopy(self.q_stack_base_seed)
 
         for i in range(self.max_size):
             # Compute configuration for preplacement, hovering above the stack
@@ -122,8 +126,6 @@ class Stack:
             H_curr[1, 3] -= self.y_steer_clear_offset
             H_curr[2, 3] += self.block_height - self.z_stear_clear_offset
 
-
-
 class BlockStacker:
     def __init__(self, team):
         self.fk = FK()
@@ -132,29 +134,28 @@ class BlockStacker:
         self.arm = ArmController()
         self.team = team
 
-        self.q_static_table_view = np.array([0, 0, 0, -pi/2, 0, pi/2, pi/4])
-        self.H_world_static_table_view = self.fk.forward(self.q_static_table_view)[1]
-
-        self.stack_base_z = .225
-        self.H_world_stack_base = deepcopy(self.H_world_static_table_view)
-        self.H_world_stack_base[:3, 3] = np.array([0.562, -0.135, self.stack_base_z])
-        self.seed = deepcopy(self.H_world_stack_base)
-        self.seed[1, 3] = .135
-
-        self.q_stack_base, _, _, _ = self.ik.inverse(self.H_world_stack_base, self.q_static_table_view, "J_pseudo", 0.5)
-        self.q_seed, _, _, _ = self.ik.inverse(self.seed, self.q_static_table_view, "J_pseudo", 0.5)
-
+        """
+        self.q_static_table_view: Configuration for viewing the static blocks
+        self.q_static_table_seed: Seed configuration for solving IK for static blocks. This is centered and slightly above the table
+        q_goal_table_seed: Seed configuration for solving IK for stacks we make on the goal table. This is centered and slightly above the goal table
+        """
         if team == 'red':
-            self.stack_1 = Stack(0.612, 0.085, team, "stack_1", use_precomputed=False)
-            self.stack_2 = Stack(0.512, 0.185, team, "stack_2", use_precomputed=False)
+            self.q_static_table_view = np.array([-0.1535, 0.2268, -0.1563, -1.0605, 0.0365, 1.2849, 0.4898])        # x, y, z = [0.562, -0.159, 0.6]    
+            self.q_static_table_seed = np.array([-0.1045, 0.2287, -0.1776, -2.0549, 0.0528, 2.2796, 0.4735])        # x, y, z = [0.562, -0.159, 0.225]
+            q_goal_table_seed = np.array([0.2518, 0.2253, 0.0248, -2.0552, -0.0074, 2.2805, 1.0661])                # x, y, z = [0.562,  0.159, 0.225]
+            self.stack_1 = Stack(0.637, 0.135, q_goal_table_seed, team, "red_stack_1", self.ik, use_precomputed=False)
+            self.stack_2 = Stack(0.487, 0.135, q_goal_table_seed, team, "red_stack_2", self.ik, use_precomputed=False)
         else:
-            self.stack_1 = Stack(0.612, -0.085, team, "stack_1", use_precomputed=False)
-            self.stack_2 = Stack(0.512, -0.185, team, "stack_2", use_precomputed=False)
+            self.q_static_table_view = np.array([0.2401, 0.2248, 0.0455, -1.0606, -0.0106, 1.2853, 1.0668])         # x, y, z = [0.562,  0.159, 0.6]
+            self.q_static_table_seed = np.array([0.2518, 0.2253, 0.0248, -2.0552, -0.0074, 2.2805, 1.0661])         # x, y, z = [0.562,  0.159, 0.225]
+            q_goal_table_seed = np.array([-0.1045, 0.2287, -0.1776, -2.0549, 0.0528, 2.2796, 0.4735])               # x, y, z = [0.562, -0.159, 0.225]
+            self.stack_1 = Stack(0.637, -0.135, q_goal_table_seed, team, "blue_stack_1", self.ik, use_precomputed=False)
+            self.stack_2 = Stack(0.487, -0.135, q_goal_table_seed, team, "blue_stack_2", self.ik, use_precomputed=False)
 
         self.H_ee_camera = self.detector.get_H_ee_camera()
         self.H_world_ee = np.eye(4)
 
-        self.num_readings = 5
+        self.num_readings = 5       # Number of readings to take for each block for averaging
         self.static_blocks = []
         self.dynamic_blocks = []
 
@@ -164,8 +165,8 @@ class BlockStacker:
     def openGripper(self):
         return self.arm.exec_gripper_cmd(0.08)
 
-    def closeGripper(self, force=None):
-        return self.arm.exec_gripper_cmd(0.03, force=force)
+    def closeGripper(self):
+        return self.arm.exec_gripper_cmd(0.03, 120)
 
     def changeAxis(self, T):
         largest_mag = 0
@@ -267,6 +268,9 @@ class BlockStacker:
             self.static_blocks.sort(key=lambda x: x[1][1, 3], reverse=False)
 
     def stackBlock(self):
+        """
+        This function assumes that the arm is already grasping a block
+        """
         # First determine which stack to use
         if self.stack_1.stack_size == self.stack_1.max_size:
             stack = self.stack_2
@@ -280,54 +284,36 @@ class BlockStacker:
         self.arm.safe_move_to_position(stack.placement_q[stack_block_idx])      # Move to placement position
         self.openGripper()                                                      # Drop the block
         self.arm.safe_move_to_position(stack.steer_clear_q[stack_block_idx])    # Move to steer clear position
-        print("Done stacking", stack_block_idx, "on ", stack.name)
+        stack.stack_size += 1                                                   # Increment stack size
+        print("Done stacking block idx ", stack_block_idx, "on ", stack.name)
 
     def stackStaticBlocks(self):
-        H_current_stack = deepcopy(self.H_world_stack_base)
         self.openGripper()
         
         for (name, H_block) in self.static_blocks:
-            # Move above the block
+            # Move above the block and solve for hovering position
             H_target = deepcopy(H_block)
-            H_target[2, 3] += 0.1
-
-            q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
+            H_target[2, 3] += 0.15
+            q_solution, _, success, _ = self.ik.inverse(H_target, self.q_static_table_seed, "J_pseudo", 0.5)
             if success:
-                print("Attempting to move above block", name)
-                # Attempting to move above the block
+                print("Attempting to move above block ", name)
                 self.arm.safe_move_to_position(q_solution)
-
-                H_target = H_block      # New target is the pose of the block
-
-                # Solving for the grasping position
-                q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
-
+                
+                # New target is the pose of the block. Then solve for grasping position
+                H_target = H_block      
+                q_solution, _, success, _ = self.ik.inverse(H_target, self.q_static_table_seed, "J_pseudo", 0.5)
                 if success:
-                    # Attempting to move to grasping position
+                    print("Attempting to move to grasping position for block ", name)
                     self.arm.safe_move_to_position(q_solution)
                     self.closeGripper()
 
-                    """ Now that the block is grasped we will move on to stacking it"""
-                    # Move to position above the stack
-                    H_current_stack[2, 3] += 0.05
-                    q_stack_above, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
-                    self.arm.safe_move_to_position(q_stack_above)
+                    # Stack the grasped block
+                    self.stackBlock()
 
-                    # Move down to drop the block
-                    H_current_stack[2, 3] -= 0.04
-                    q_stack, _, _, _ = self.ik.inverse(H_current_stack, self.q_stack_base, "J_pseudo", 0.5)
-                    self.arm.safe_move_to_position(q_stack)
-                    self.openGripper()
-
-                    # Move back above the stack
-                    self.arm.safe_move_to_position(q_stack_above)
-                    
-                    # Update the stack position
-                    H_current_stack[2, 3] += 0.04
                 else:
-                    print("Failed to move to grasping position")
+                    print("Failed to move to grasping position for block", name)
             else:
-                print("Failed to move above block")
+                print("Failed to move above block ", name)
 
     def stack_dynamic_blocks(self):
         q_turntable_grip = deepcopy(self.q_turntable_pregrip)
@@ -349,47 +335,6 @@ class BlockStacker:
         self.detectStaticBlocks()
         self.stackStaticBlocks()
         
-    def testGrasping(self):
-        for (name, H_block) in self.static_blocks:
-            # Move above the block
-            H_target = deepcopy(H_block)
-            H_target[2, 3] += 0.1
-
-            q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
-            if success:
-                print("Attempting to move above block", name)
-                # Attempting to move above the block
-                self.moveToPosition(q_goal=q_solution)
-                self.openGripper()
-
-                H_target = H_block      # New target is the pose of the block
-
-                # Solving for the grasping position
-                q_solution, _, success, _ = self.ik.inverse(H_target, self.q_seed, "J_pseudo", 0.5)
-
-                if success:
-                    # Attempting to move to grasping position
-                    self.moveToPosition(q_goal=q_solution)
-                    while True:
-                        force = float(input("Enter force to apply: "))
-                        success = self.closeGripper(force)
-                        print("Gripper closed successfully:", success)
-
-                        input("Press enter to open gripper")
-                        success = self.openGripper()
-
-                else:
-                    print("Failed to find inverse when going down")
-            else:
-                print("Failed to find inverse going above")
-            break
-
-    def testGripper(self):
-        input('Press enter to open')
-        self.openGripper()
-        input("Prese enter to close")
-        self.closeGripper()
-
     def positionFinder(self, target, seed):
         H_target = deepcopy(target)
         q_seed = deepcopy(seed)
@@ -443,8 +388,6 @@ def main():
     ###############################################
     """
 
-    # block_stacker.moveToTurnTableView()
-    # block_stacker.stack_dynamic_blocks()
     block_stacker.moveToStaticTableView()
     block_stacker.detectStaticBlocks()
     block_stacker.stackStaticBlocks()
