@@ -43,7 +43,7 @@ class Stack:
         self.name = name
         self.ik = ik
 
-        self.max_size = 2
+        self.max_size = 6
         self.stack_size = 0
 
         self.preplacement_q = np.zeros((self.max_size, 7))
@@ -52,6 +52,10 @@ class Stack:
 
         self.block_height = 0.05
         self.z_hover_offset = 0.05
+        if team == 'red':
+            self.y_hover_offset = -0.05
+        else:
+            self.y_hover_offset = 0.05
         self.z_drop_offset = 0.01
         self.z_stear_clear_offset = 0.05
         self.x_steer_clear_offset = -0.05
@@ -67,6 +71,7 @@ class Stack:
         if use_precomputed:
             self.loadPositions()
         else:
+            print("Computing stack positions")
             self.computeStackPositions()
             if self.computations_are_valid:
                 self.savePositions()
@@ -94,6 +99,7 @@ class Stack:
         for i in range(self.max_size):
             # Compute configuration for preplacement, hovering above the stack
             H_curr[2, 3] += self.z_hover_offset
+            H_curr[1, 3] += self.y_hover_offset
             q_curr, _, success, _ = self.ik.inverse(H_curr, q_curr, "J_pseudo", 0.5)
             if success:
                 self.preplacement_q[i] = q_curr
@@ -103,6 +109,7 @@ class Stack:
                 
             # Compute configuration for placement, dropping the block
             H_curr[2, 3] += self.z_drop_offset - self.z_hover_offset
+            H_curr[1, 3] -= self.y_hover_offset
             q_curr, _, success, _ = self.ik.inverse(H_curr, q_curr, "J_pseudo", 0.5)
             if success:
                 self.placement_q[i] = q_curr
@@ -134,6 +141,7 @@ class BlockStacker:
         self.arm = ArmController()
         self.team = team
 
+        self.dynamic_blocks_height = 0.24
         """
         self.q_static_table_view: Configuration for viewing the static blocks
         self.q_static_table_seed: Seed configuration for solving IK for static blocks. This is centered and slightly above the table
@@ -142,15 +150,62 @@ class BlockStacker:
         if team == 'red':
             self.q_static_table_view = np.array([-0.1535, 0.2268, -0.1563, -1.0605, 0.0365, 1.2849, 0.4898])        # x, y, z = [0.562, -0.159, 0.6]    
             self.q_static_table_seed = np.array([-0.1045, 0.2287, -0.1776, -2.0549, 0.0528, 2.2796, 0.4735])        # x, y, z = [0.562, -0.159, 0.225]
-            q_goal_table_seed = np.array([0.2518, 0.2253, 0.0248, -2.0552, -0.0074, 2.2805, 1.0661])                # x, y, z = [0.562,  0.159, 0.225]
-            self.stack_1 = Stack(0.637, 0.135, q_goal_table_seed, team, "red_stack_1", self.ik, use_precomputed=False)
-            self.stack_2 = Stack(0.487, 0.135, q_goal_table_seed, team, "red_stack_2", self.ik, use_precomputed=False)
+            self.q_goal_table_seed = np.array([0.2518, 0.2253, 0.0248, -2.0552, -0.0074, 2.2805, 1.0661])                # x, y, z = [0.562,  0.159, 0.225]
+            self.stack_1 = Stack(0.637, 0.185, deepcopy(self.q_goal_table_seed), team, "6_red_stack_1", self.ik, use_precomputed=True)
+            self.stack_2 = Stack(0.487, 0.135, deepcopy(self.q_goal_table_seed), team, "6_red_stack_2", self.ik, use_precomputed=True)
+
+            # Dynamic configuration
+            self.q_avoid_tower = [-0.1754, -0.693, 0.0953, -1.9921, 0.0631, 1.3019, 0.7002]   # x, y, z = [0.3,  0.0, 0.6]
+            self.q_turntable_view = [pi/2,pi/8,0,-pi/2+pi/8,0,pi/2,pi/4]
+            self.q_turntable_seed = [pi/4+0.2,pi/2,0,-0.1,pi/2-pi/10,pi/2,-pi/4-0.1]
+            self.q_turntable_safepos = deepcopy(self.q_turntable_view)
+            self.q_turntable_safepos[0] = pi/4
+
+            _, H_turntable_pregrip = self.fk.forward(self.q_turntable_seed)
+            H_turntable_pregrip[2,3] = self.dynamic_blocks_height
+            self.q_turntable_pregrip, _, success, message = self.ik.inverse(H_turntable_pregrip, self.q_turntable_seed, "J_pseudo", 0.5)
+            if success:
+                self.attempt_dynamic_blocks = True
+            else:
+                self.attempt_dynamic_blocks = False
+
+            self.q_turntable_grip = deepcopy(self.q_turntable_pregrip)
+            self.q_turntable_grip[0] += 0.2
+            self.q_turntable_grip[5] -= 0.2
+
+            self.q_aftergrip = deepcopy(self.q_turntable_pregrip)
+            self.q_aftergrip[4] += pi/6+pi/10
+            self.q_dynamic_drop = np.array([-0.1197, 0.1351, -0.1621, -1.9735, 0.0253, 2.1068, 0.4921])   # x, y, z = [0.562,  -0.159, 0.3]
+
         else:
             self.q_static_table_view = np.array([0.2401, 0.2248, 0.0455, -1.0606, -0.0106, 1.2853, 1.0668])         # x, y, z = [0.562,  0.159, 0.6]
             self.q_static_table_seed = np.array([0.2518, 0.2253, 0.0248, -2.0552, -0.0074, 2.2805, 1.0661])         # x, y, z = [0.562,  0.159, 0.225]
-            q_goal_table_seed = np.array([-0.1045, 0.2287, -0.1776, -2.0549, 0.0528, 2.2796, 0.4735])               # x, y, z = [0.562, -0.159, 0.225]
-            self.stack_1 = Stack(0.637, -0.135, q_goal_table_seed, team, "blue_stack_1", self.ik, use_precomputed=False)
-            self.stack_2 = Stack(0.487, -0.135, q_goal_table_seed, team, "blue_stack_2", self.ik, use_precomputed=False)
+            self.q_goal_table_seed = np.array([-0.1045, 0.2287, -0.1776, -2.0549, 0.0528, 2.2796, 0.4735])               # x, y, z = [0.562, -0.159, 0.225]
+            self.stack_1 = Stack(0.637, -0.135, deepcopy(self.q_goal_table_seed), team, "6_blue_stack_1", self.ik, use_precomputed=True)
+            self.stack_2 = Stack(0.487, -0.135, deepcopy(self.q_goal_table_seed), team, "6_blue_stack_2", self.ik, use_precomputed=True)
+
+            # Dynamic configuration
+            self.q_avoid_tower  = [-0.2401, 0.2249, 0.0455, -1.0605, -0.0106, 1.2852, 1.0669]
+            self.q_turntable_view = [-pi/2,pi/8,0,-pi/2+pi/8,0,pi/2,pi/4]
+            self.q_turntable_seed = [-2.8,pi/2,pi/2,-pi/2+pi/8,-pi/10,pi/2+pi/8,-pi/4]    # different for red
+            self.q_turntable_safepos = deepcopy(self.q_turntable_view)
+            self.q_turntable_safepos[0] = -2.7
+
+            _, H_turntable_pregrip = self.fk.forward(self.q_turntable_seed)
+            H_turntable_pregrip[2,3] = self.dynamic_blocks_height
+            self.q_turntable_pregrip, _, success, message = self.ik.inverse(H_turntable_pregrip, self.q_turntable_seed, "J_pseudo", 0.5)
+            if success:
+                self.attempt_dynamic_blocks = True
+            else:
+                self.attempt_dynamic_blocks = False
+            
+            self.q_turntable_grip = deepcopy(self.q_turntable_pregrip)
+            self.q_turntable_grip[0] += 0.2
+
+            self.q_aftergrip = deepcopy(self.q_turntable_pregrip)
+            self.q_aftergrip[3] += pi/6
+            self.q_dynamic_drop = np.array([ 0.2024,  0.1338,  0.0762, -1.9735, -0.0118,  2.1069,  1.0694])
+
 
         self.H_ee_camera = self.detector.get_H_ee_camera()
         self.H_world_ee = np.eye(4)
@@ -158,9 +213,6 @@ class BlockStacker:
         self.num_readings = 5       # Number of readings to take for each block for averaging
         self.static_blocks = []
         self.dynamic_blocks = []
-
-        self.q_turntable_pregrip=None
-        self.q_turntable_safepos=None
     
     def openGripper(self):
         return self.arm.exec_gripper_cmd(0.08)
@@ -211,35 +263,103 @@ class BlockStacker:
     
     def moveToTurnTableView(self):
         self.arm.open_gripper()
-        dynamic_blocks_height = 0
-        # red
-        q_turntable_view = [pi/2,0,pi/8,-pi/2+pi/8,0,pi/2,pi/4]
+
+        print("Moving to avoid tower")
+        self.arm.safe_move_to_position(self.q_avoid_tower)
         
-        # blue
-        q_turntable_view = [-pi/2,pi/8,0,-pi/2+pi/8,0,pi/2,pi/4]
-        q_turntable_seed = [-2.8,pi/2,pi/2,-pi/2+pi/8,-pi/10,pi/2+pi/8,-pi/4]    # different for red
-        _,H_turntable_pregrip = self.fk.forward(q_turntable_seed)
-        self.arm.safe_move_to_position(q_turntable_view)
-        self.H_world_ee = self.fk.forward(q_turntable_view)[1]
-        for (name, H_camera_block) in self.detector.get_detections():
-            H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
-            show_pose(H_world_block, name, "world")
-            dynamic_blocks_height += H_world_block[2,3]
-            self.dynamic_blocks.append((name, H_world_block))
-            # block_changed = self.change_axis(H_world_block)
-        if len(self.dynamic_blocks) != 0 :
-            dynamic_blocks_height = (dynamic_blocks_height)/len(self.dynamic_blocks)
-        else:
-            dynamic_blocks_height = 0.22
-        H_turntable_pregrip[2,3] = dynamic_blocks_height
-        self.q_turntable_safepos = deepcopy(q_turntable_view)
-        self.q_turntable_safepos[0] = -2.8
+        print("moving to safe position")
         self.arm.safe_move_to_position(self.q_turntable_safepos)
-        self.q_turntable_pregrip, _, success, _ = self.ik.inverse(H_turntable_pregrip,q_turntable_seed,"J_pseudo",0.5)
+
+        print("STACK, moving to turntable pregrip")
+        self.arm.safe_move_to_position(self.q_turntable_pregrip)
+
+        print("STACK, moving to turntable grip")
+        self.arm.safe_move_to_position(self.q_turntable_grip)
+
+    def stackDynamicBlocks(self):
+
+        rospy.sleep(5)
+        self.closeGripper()
+
+        self.openGripper()
+
+        rospy.sleep(10)
+        self.closeGripper()
+
+        # move to static view
+        print("STACK, moving to aftergrip")
+        self.arm.safe_move_to_position(self.q_aftergrip)
+
+        print("STACK, moving to q_avoid_tower")
+        self.arm.safe_move_to_position(self.q_avoid_tower)
+        
+        print("STACK, moving to drop view")
+        self.arm.safe_move_to_position(self.q_dynamic_drop)
+        self.openGripper()
+
+        self.moveToStaticTableView()
+
+        self.detectSingleBlock()
+        self.attemptStackDynamicBlock()
+        
+    def attemptStackDynamicBlock(self):
+        self.openGripper()
+        
+        name, H_block = self.dynamic_blocks[0]
+        # Move above the block and solve for hovering position
+        H_target = deepcopy(H_block)
+        H_target[2, 3] += 0.15
+        q_solution, _, success, message = self.ik.inverse(H_target, self.q_static_table_seed, "J_pseudo", 0.5)
         if success:
-            self.arm.safe_move_to_position(self.q_turntable_pregrip)
+            print("Attempting to move above block ", name)
+            self.arm.safe_move_to_position(q_solution)
+            
+            # New target is the pose of the block. Then solve for grasping position
+            H_target = H_block      
+            q_solution, _, success, message = self.ik.inverse(H_target, self.q_static_table_seed, "J_pseudo", 0.5)
+            if success:
+                print("Attempting to move to grasping position for block ", name)
+                self.arm.safe_move_to_position(q_solution)
+                self.closeGripper()
+
+                # Stack the grasped block
+                self.stackBlock()
+
+            else:
+                print("Failed to move to grasping position for block", name)
         else:
-            print("error: can't find path for q_turntable_pregrip")
+            print("Failed to move above block ", name)
+    
+    def detectSingleBlock(self):
+        self.dynamic_blocks = []    # Clear the list
+
+        dynamic_blocks_readings = {}
+        for i in range(self.num_readings):
+            for (name, H_camera_block) in self.detector.get_detections():
+                H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
+                if self.team == 'red':
+                    if H_world_block[1,3] < 0.0:
+                        if name not in dynamic_blocks_readings:
+                            # Create the empty list
+                            dynamic_blocks_readings[name] = []
+                        dynamic_blocks_readings[name].append(H_world_block)
+                else:
+                    if H_world_block[1,3] > 0.0:
+                        if name not in dynamic_blocks_readings:
+                            # Create the empty list
+                            dynamic_blocks_readings[name] = []
+                        dynamic_blocks_readings[name].append(H_world_block)
+        
+        for (name, block_list) in dynamic_blocks_readings.items():
+            block_position = np.mean(np.asarray(block_list)[:,:3,3], axis=0)
+            H_world_block = np.eye(4)
+            H_world_block[:3,3] = block_position
+            H_world_block[:3,:3] = block_list[-1][:3,:3]
+
+            block_changed = self.changeAxis(H_world_block)
+            show_pose(H_world_block, name, 'world')
+            show_pose(block_changed, name+"_c", 'world')
+            self.dynamic_blocks.append((name, block_changed))
 
     def detectStaticBlocks(self):
         static_blocks_readings = {}
@@ -273,6 +393,9 @@ class BlockStacker:
         """
         # First determine which stack to use
         if self.stack_1.stack_size == self.stack_1.max_size:
+            if self.stack_2.stack_size == self.stack_2.max_size:
+                print("Both stacks are full!")
+                exit()
             stack = self.stack_2
         else:
             stack = self.stack_1
@@ -315,26 +438,7 @@ class BlockStacker:
             else:
                 print("Failed to move above block ", name)
 
-    def stack_dynamic_blocks(self):
-        q_turntable_grip = deepcopy(self.q_turntable_pregrip)
-        q_turntable_grip[0] += 0.2
-        self.arm.safe_move_to_position(q_turntable_grip)
-        while True:
-            if self.closeGripper(120):
-                # move to static view
-                q_aftergrip = deepcopy(self.q_turntable_pregrip)
-                q_aftergrip[3] += pi/6
-                self.arm.safe_move_to_position(q_aftergrip)
-                
-                self.arm.safe_move_to_position(self.q_static_table_view)
-                self.openGripper()
-                break
-            else:
-                rospy.sleep(10)
-        self.moveToStaticTableView
-        self.detectStaticBlocks()
-        self.stackStaticBlocks()
-        
+    """Helper Configuration Methods"""
     def positionFinder(self, target, seed):
         H_target = deepcopy(target)
         q_seed = deepcopy(seed)
@@ -356,6 +460,90 @@ class BlockStacker:
                 q_seed = q_solution
             else:
                 print("Failed to find inverse")
+
+    def configurationFinder(self, seed):
+        q_curr = deepcopy(seed)
+        print("Current configuration:\n", q_curr)
+        while True:
+            q0_offset = float(input("Enter q0 offset: "))
+            q1_offset = float(input("Enter q1 offset: "))
+            q2_offset = float(input("Enter q2 offset: "))
+            q3_offset = float(input("Enter q3 offset: "))
+            q4_offset = float(input("Enter q4 offset: "))
+            q5_offset = float(input("Enter q5 offset: "))
+            q6_offset = float(input("Enter q6 offset: "))
+            q_offset = np.array([q0_offset, q1_offset, q2_offset, q3_offset, q4_offset, q5_offset, q6_offset])
+            q_curr += q_offset
+            print("Current configuration:\n", q_curr)
+            self.arm.safe_move_to_position(q_curr)
+
+    def detect_dynamic_blocks_height(self):
+        self.dynamic_blocks_height = 0
+        self.arm.safe_move_to_position(self.q_turntable_view)
+        print("start detection")
+        for (name, H_camera_block) in self.detector.get_detections():
+            H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
+            show_pose(H_world_block, name, "world")
+            self.dynamic_blocks_height += H_world_block[2,3]
+            self.dynamic_blocks.append((name, H_world_block))
+            # block_changed = self.change_axis(H_world_block)
+        self.dynamic_blocks_height = (self.dynamic_blocks_height)/len(self.dynamic_blocks)
+        print("dynamic height: ", self.dynamic_blocks_height)
+
+    def testPositions(self):
+        # Go to static table view
+        input("Press ENTER to go to static table view")
+        self.arm.safe_move_to_position(self.q_static_table_view)
+
+        # Go to static table seed
+        input("Press ENTER to go to static table seed")
+        self.arm.safe_move_to_position(self.q_static_table_seed)
+
+        # Go to goal table seed
+        input("Press ENTER to go to goal table seed")
+        self.arm.safe_move_to_position(self.q_goal_table_seed)
+
+        # Go to stack 1 base
+        input("Press ENTER to go to stack 1 base")
+        self.arm.safe_move_to_position(self.stack_1.placement_q[0])
+
+        # Go to stack 2 base
+        input("Press ENTER to go to stack 2 base")
+        self.arm.safe_move_to_position(self.stack_2.placement_q[0])
+
+        print("##########################")
+        input("Press ENTER to begin dynamic block detection")
+
+        self.detect_dynamic_blocks_height()
+        self.arm.safe_move_to_position(self.q_turntable_view)
+
+        print("moving to safe position")
+        self.openGripper()
+        self.arm.safe_move_to_position(self.q_turntable_safepos)
+
+        print("STACK, moving to turntable pregrip")
+        self.arm.safe_move_to_position(self.q_turntable_pregrip)
+
+        print("STACK, moving to turntable grip")
+        self.arm.safe_move_to_position(self.q_turntable_grip)
+
+        input("Press ENTER to close gripper")
+        self.closeGripper()
+
+        print("STACK, moving to aftergrip")
+        self.arm.safe_move_to_position(self.q_aftergrip)
+
+        print("STACK, moving to q_avoid_tower")
+        self.arm.safe_move_to_position(self.q_avoid_tower)
+        
+        print("STACK, moving to drop view")
+        self.arm.safe_move_to_position(self.q_dynamic_drop)
+        self.openGripper()
+
+        print("#####################################")
+        print("REMEMBER TO CHANGE THE DYNAMIC HEIGHT: ", self.dynamic_blocks_height)
+        print("#####################################")
+
 
 def main():
     np.set_printoptions(precision=4, suppress=True)
@@ -388,14 +576,23 @@ def main():
     ###############################################
     """
 
+    # Attempt to stack static blocks
     block_stacker.moveToStaticTableView()
     block_stacker.detectStaticBlocks()
     block_stacker.stackStaticBlocks()
-
-    # block_stacker.positionFinder(block_stacker.H_world_ee, block_stacker.q_static_table_view)
     
+    # Now for the dynamic blocks
+    if block_stacker.attempt_dynamic_blocks:
+        while True:
+            block_stacker.moveToTurnTableView()
+            block_stacker.stackDynamicBlocks()
 
-        
+    """
+    THIS IS DEBUGGING CODE BELOW
+    """
+    # block_stacker.testPositions()
+    # block_stacker.positionFinder(block_stacker.H_world_ee, block_stacker.q_static_table_view)
+    # block_stacker.configurationFinder(block_stacker.q_turntable_grip)
 
 
 if __name__ == "__main__":
