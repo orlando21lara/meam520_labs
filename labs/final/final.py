@@ -305,6 +305,9 @@ class BlockStacker:
     def attemptStackDynamicBlock(self):
         self.openGripper()
         
+        if len(self.dynamic_blocks) == 0:
+            print("No blocks detected")
+            return
         name, H_block = self.dynamic_blocks[0]
         # Move above the block and solve for hovering position
         H_target = deepcopy(H_block)
@@ -337,6 +340,7 @@ class BlockStacker:
         for i in range(self.num_readings):
             for (name, H_camera_block) in self.detector.get_detections():
                 H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
+                H_world_block[2, 3] = 0.225
                 if self.team == 'red':
                     if H_world_block[1,3] < 0.0:
                         if name not in dynamic_blocks_readings:
@@ -359,7 +363,8 @@ class BlockStacker:
             block_changed = self.changeAxis(H_world_block)
             show_pose(H_world_block, name, 'world')
             show_pose(block_changed, name+"_c", 'world')
-            self.dynamic_blocks.append((name, block_changed))
+            if np.abs(np.dot(np.array([0,0,1]), block_changed[:3,2])) > 0.86:
+                self.dynamic_blocks.append((name, block_changed))
 
     def detectStaticBlocks(self):
         static_blocks_readings = {}
@@ -377,10 +382,12 @@ class BlockStacker:
             H_camera_block[:3,:3] = block_list[-1][:3,:3]
 
             H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
+            H_world_block[2,3] = 0.225
             block_changed = self.changeAxis(H_world_block)
-            # show_pose(H_world_block, name, 'world')
-            # show_pose(block_changed, name+"_c", 'world')
-            self.static_blocks.append((name, block_changed))
+            show_pose(H_world_block, name, 'world')
+            show_pose(block_changed, name+"_c", 'world')
+            if np.abs(np.dot(np.array([0,0,1]), block_changed[:3,2])) > 0.86:
+                self.static_blocks.append((name, block_changed))
 
         if self.team == 'red':
             self.static_blocks.sort(key=lambda x: x[1][1, 3], reverse=True) 
@@ -514,7 +521,7 @@ class BlockStacker:
         print("##########################")
         input("Press ENTER to begin dynamic block detection")
 
-        self.detect_dynamic_blocks_height()
+        # self.detect_dynamic_blocks_height()
         self.arm.safe_move_to_position(self.q_turntable_view)
 
         print("moving to safe position")
