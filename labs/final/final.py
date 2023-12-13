@@ -51,11 +51,14 @@ class Stack:
         self.steer_clear_q = np.zeros((self.max_size, 7))
 
         self.block_height = 0.05
-        self.z_hover_offset = 0.05
+        self.z_hover_offset = 0.08
+        self.x_hover_offset = -0.10
         if team == 'red':
-            self.y_hover_offset = -0.05
+            # self.y_hover_offset = -0.05
+            self.y_hover_offset = 0.0
         else:
-            self.y_hover_offset = 0.05
+            # self.y_hover_offset = 0.05
+            self.y_hover_offset = 0.0
         self.z_drop_offset = 0.01
         self.z_stear_clear_offset = 0.05
         self.x_steer_clear_offset = -0.05
@@ -100,6 +103,7 @@ class Stack:
             # Compute configuration for preplacement, hovering above the stack
             H_curr[2, 3] += self.z_hover_offset
             H_curr[1, 3] += self.y_hover_offset
+            H_curr[0, 3] += self.x_hover_offset
             q_curr, _, success, _ = self.ik.inverse(H_curr, q_curr, "J_pseudo", 0.5)
             if success:
                 self.preplacement_q[i] = q_curr
@@ -110,6 +114,7 @@ class Stack:
             # Compute configuration for placement, dropping the block
             H_curr[2, 3] += self.z_drop_offset - self.z_hover_offset
             H_curr[1, 3] -= self.y_hover_offset
+            H_curr[0, 3] -= self.x_hover_offset
             q_curr, _, success, _ = self.ik.inverse(H_curr, q_curr, "J_pseudo", 0.5)
             if success:
                 self.placement_q[i] = q_curr
@@ -151,11 +156,12 @@ class BlockStacker:
             self.q_static_table_view = np.array([-0.1535, 0.2268, -0.1563, -1.0605, 0.0365, 1.2849, 0.4898])        # x, y, z = [0.562, -0.159, 0.6]    
             self.q_static_table_seed = np.array([-0.1045, 0.2287, -0.1776, -2.0549, 0.0528, 2.2796, 0.4735])        # x, y, z = [0.562, -0.159, 0.225]
             self.q_goal_table_seed = np.array([0.2518, 0.2253, 0.0248, -2.0552, -0.0074, 2.2805, 1.0661])                # x, y, z = [0.562,  0.159, 0.225]
-            self.stack_1 = Stack(0.637, 0.185, deepcopy(self.q_goal_table_seed), team, "6_red_stack_1", self.ik, use_precomputed=True)
-            self.stack_2 = Stack(0.487, 0.135, deepcopy(self.q_goal_table_seed), team, "6_red_stack_2", self.ik, use_precomputed=True)
+            self.stack_1 = Stack(0.637, 0.135, deepcopy(self.q_goal_table_seed), team, "6_red_stack_1", self.ik, use_precomputed=True)
+            self.stack_2 = Stack(0.487, 0.115, deepcopy(self.q_goal_table_seed), team, "6_red_stack_2", self.ik, use_precomputed=True)
 
             # Dynamic configuration
-            self.q_avoid_tower = [-0.1754, -0.693, 0.0953, -1.9921, 0.0631, 1.3019, 0.7002]   # x, y, z = [0.3,  0.0, 0.6]
+            # self.q_avoid_tower = [-0.1754, -0.693, 0.0953, -1.9921, 0.0631, 1.3019, 0.7002]   # x, y, z = [0.3,  0.0, 0.6]
+            self.q_avoid_tower = [0.7886, 0.2287, 0.309, -1.0666, -0.072, 1.2855, 1.8551]   # x, y, z = [0.3,  0.5, 0.6]
             self.q_turntable_view = [pi/2,pi/8,0,-pi/2+pi/8,0,pi/2,pi/4]
             self.q_turntable_seed = [pi/4+0.2,pi/2,0,-0.1,pi/2-pi/10,pi/2,-pi/4-0.1]
             self.q_turntable_safepos = deepcopy(self.q_turntable_view)
@@ -175,7 +181,9 @@ class BlockStacker:
 
             self.q_aftergrip = deepcopy(self.q_turntable_pregrip)
             self.q_aftergrip[4] += pi/6+pi/10
-            self.q_dynamic_drop = np.array([-0.1197, 0.1351, -0.1621, -1.9735, 0.0253, 2.1068, 0.4921])   # x, y, z = [0.562,  -0.159, 0.3]
+            # self.q_dynamic_drop = np.array([-0.1197, 0.1351, -0.1621, -1.9735, 0.0253, 2.1068, 0.4921])   # x, y, z = [0.562,  -0.159, 0.3]
+            self.q_dynamic_drop = np.array([0.2927, 0.1159, 0.1445, -2.2093, -0.0229, 2.324, 1.2373])       # x, y, z = [0.492,  0.229, 0.225]
+            self.q_dynamic_view = np.array([0.1844, -0.059, 0.2451, -1.9499, 0.015, 1.8926, 1.2097])        # x, y, z = [0.492,  0.229, 0.4]
 
         else:
             self.q_static_table_view = np.array([0.2401, 0.2248, 0.0455, -1.0606, -0.0106, 1.2853, 1.0668])         # x, y, z = [0.562,  0.159, 0.6]
@@ -185,11 +193,12 @@ class BlockStacker:
             self.stack_2 = Stack(0.487, -0.135, deepcopy(self.q_goal_table_seed), team, "6_blue_stack_2", self.ik, use_precomputed=True)
 
             # Dynamic configuration
-            self.q_avoid_tower  = [-0.2401, 0.2249, 0.0455, -1.0605, -0.0106, 1.2852, 1.0669]
+            # self.q_avoid_tower  = [-0.2401, 0.2249, 0.0455, -1.0605, -0.0106, 1.2852, 1.0669]
+            self.q_avoid_tower = [-0.7062, 0.236, -0.4166, -1.0662, 0.0989, 1.284, -0.2991]   # x, y, z = [0.3,  -0.5, 0.6]
             self.q_turntable_view = [-pi/2,pi/8,0,-pi/2+pi/8,0,pi/2,pi/4]
             self.q_turntable_seed = [-2.8,pi/2,pi/2,-pi/2+pi/8,-pi/10,pi/2+pi/8,-pi/4]    # different for red
             self.q_turntable_safepos = deepcopy(self.q_turntable_view)
-            self.q_turntable_safepos[0] = -2.7
+            self.q_turntable_safepos[0] = -2.3
 
             _, H_turntable_pregrip = self.fk.forward(self.q_turntable_seed)
             H_turntable_pregrip[2,3] = self.dynamic_blocks_height
@@ -204,7 +213,9 @@ class BlockStacker:
 
             self.q_aftergrip = deepcopy(self.q_turntable_pregrip)
             self.q_aftergrip[3] += pi/6
-            self.q_dynamic_drop = np.array([ 0.2024,  0.1338,  0.0762, -1.9735, -0.0118,  2.1069,  1.0694])
+            # self.q_dynamic_drop = np.array([ 0.2024,  0.1338,  0.0762, -1.9735, -0.0118,  2.1069,  1.0694])
+            self.q_dynamic_drop = np.array([-0.2049, 0.1179, -0.2333, -2.2093, 0.0373, 2.3237, 0.3232])       # x, y, z = [0.492,  -0.229, 0.225]
+            self.q_dynamic_view = np.array([-0.2218, -0.0585, -0.2087, -1.9499, -0.0127, 1.8927, 0.3592])        # x, y, z = [0.492,  -0.229, 0.4]
 
 
         self.H_ee_camera = self.detector.get_H_ee_camera()
@@ -267,8 +278,9 @@ class BlockStacker:
         print("Moving to avoid tower")
         self.arm.safe_move_to_position(self.q_avoid_tower)
         
-        print("moving to safe position")
-        self.arm.safe_move_to_position(self.q_turntable_safepos)
+        if self.team == 'blue':
+            print("moving to safe position")
+            self.arm.safe_move_to_position(self.q_turntable_safepos)
 
         print("STACK, moving to turntable pregrip")
         self.arm.safe_move_to_position(self.q_turntable_pregrip)
@@ -277,18 +289,12 @@ class BlockStacker:
         self.arm.safe_move_to_position(self.q_turntable_grip)
 
     def stackDynamicBlocks(self):
-
-        rospy.sleep(5)
+        rospy.sleep(15)
         self.closeGripper()
 
-        self.openGripper()
-
-        rospy.sleep(10)
-        self.closeGripper()
-
-        # move to static view
-        print("STACK, moving to aftergrip")
-        self.arm.safe_move_to_position(self.q_aftergrip)
+        if self.team == 'blue':
+            print("STACK, moving to aftergrip")
+            self.arm.safe_move_to_position(self.q_aftergrip)
 
         print("STACK, moving to q_avoid_tower")
         self.arm.safe_move_to_position(self.q_avoid_tower)
@@ -297,7 +303,11 @@ class BlockStacker:
         self.arm.safe_move_to_position(self.q_dynamic_drop)
         self.openGripper()
 
-        self.moveToStaticTableView()
+        # self.moveToStaticTableView()
+        print("STACK, moving to dynamic view")
+        self.arm.safe_move_to_position(self.q_dynamic_view)
+
+        self.H_world_ee = self.fk.forward(self.q_dynamic_view)[1]
 
         self.detectSingleBlock()
         self.attemptStackDynamicBlock()
@@ -342,13 +352,13 @@ class BlockStacker:
                 H_world_block = self.H_world_ee @ self.H_ee_camera @ H_camera_block
                 H_world_block[2, 3] = 0.225
                 if self.team == 'red':
-                    if H_world_block[1,3] < 0.0:
+                    if H_world_block[1,3] > 0.159:
                         if name not in dynamic_blocks_readings:
                             # Create the empty list
                             dynamic_blocks_readings[name] = []
                         dynamic_blocks_readings[name].append(H_world_block)
                 else:
-                    if H_world_block[1,3] > 0.0:
+                    if H_world_block[1,3] < -0.159:
                         if name not in dynamic_blocks_readings:
                             # Create the empty list
                             dynamic_blocks_readings[name] = []
